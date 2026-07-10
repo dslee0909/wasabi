@@ -1,0 +1,23 @@
+# 비밀값 — 절대 커밋 금지!
+.env
+
+# 파이썬
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# 데이터베이스 (활동시간/레벨)
+data.db
+*.sqlite3
+
+# 서버별 설정 (자동 역할 등 런타임 상태)
+config.json
+
+# 에디터/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
