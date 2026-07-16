@@ -31,6 +31,27 @@ from store import get_guild_config, update_guild_config
 
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
 
+
+def owner_only():
+    """봇 소유자 또는 서버 소유자만 통과시키는 체크.
+
+    경제 관리 명령(코인 지급 등)은 코인을 무제한으로 찍어낼 수 있다. 원래는
+    manage_guild('서버 관리') 권한자 전원에게 열려 있었는데, 그러면 관리자가
+    여럿인 서버에서는 사실상 여러 명이 통화를 발행할 수 있다.
+    실제로 한 서버의 통화량이 지급 명령으로 3,442억까지 부풀었다
+    (같은 시기 정상 서버는 152만. 잔액은 guild_id 별로 분리돼 있어 서로 영향은 없다).
+
+    Discord 의 default_permissions 는 UI 노출만 제어할 뿐 서버에서 덮어쓸 수 있으므로
+    보안 경계가 아니다. 실제 차단은 이 체크가 한다.
+    """
+    async def predicate(interaction: discord.Interaction) -> bool:
+        if interaction.guild and interaction.user.id == interaction.guild.owner_id:
+            return True
+        return await interaction.client.is_owner(interaction.user)
+
+    return app_commands.check(predicate)
+
+
 DEFAULT_INTEREST = 0.01  # 12시간마다 1%
 INTEREST_PERIOD = 12 * 3600  # 12시간
 
@@ -274,7 +295,7 @@ class Economy(commands.Cog):
     @app_commands.choices(티어=[
         app_commands.Choice(name=f"{t}: {RODS[t]['name']}", value=t) for t in range(0, 7)
     ])
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @owner_only()
     async def admin_set_rod(self, interaction: discord.Interaction, 멤버: discord.Member, 티어: app_commands.Choice[int]):
         gid = interaction.guild.id
         tier = 티어.value
@@ -288,7 +309,7 @@ class Economy(commands.Cog):
 
     @낚시관리.command(name="강화", description="멤버의 강화 수치를 설정합니다")
     @app_commands.describe(멤버="대상", 레벨="설정할 강화 레벨")
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @owner_only()
     async def admin_set_enhance(self, interaction: discord.Interaction, 멤버: discord.Member, 레벨: int):
         gid = interaction.guild.id
         cap = RODS[vt.get_rod(gid, 멤버.id)]["cap"]
@@ -300,7 +321,7 @@ class Economy(commands.Cog):
 
     @낚시관리.command(name="회수", description="멤버의 낚싯대를 기본으로 되돌립니다 (강화도 초기화)")
     @app_commands.describe(멤버="대상")
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @owner_only()
     async def admin_reset_rod(self, interaction: discord.Interaction, 멤버: discord.Member):
         gid = interaction.guild.id
         vt.set_rod(gid, 멤버.id, 0)
@@ -332,7 +353,7 @@ class Economy(commands.Cog):
 
     @은행.command(name="이자설정", description="은행 이자율(12시간마다 %)을 설정합니다")
     @app_commands.describe(이율="12시간마다 붙는 이자 % (예: 1 = 1%, 0 = 이자 끄기)")
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @owner_only()
     async def set_interest(self, interaction: discord.Interaction, 이율: float):
         if 이율 < 0:
             await interaction.response.send_message("0 이상으로 설정해주세요.", ephemeral=True)
@@ -343,7 +364,7 @@ class Economy(commands.Cog):
 
     @코인.command(name="지급", description="멤버에게 코인을 지급합니다")
     @app_commands.describe(멤버="지급 대상", 금액="지급할 코인 (1 이상)")
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @owner_only()
     async def give_coins(self, interaction: discord.Interaction, 멤버: discord.Member, 금액: int):
         if 금액 < 1:
             await interaction.response.send_message("1 이상 지급해주세요.", ephemeral=True)
@@ -355,7 +376,7 @@ class Economy(commands.Cog):
 
     @코인.command(name="회수", description="멤버의 코인을 회수합니다")
     @app_commands.describe(멤버="회수 대상", 금액="회수할 코인 (1 이상)")
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @owner_only()
     async def take_coins(self, interaction: discord.Interaction, 멤버: discord.Member, 금액: int):
         if 금액 < 1:
             await interaction.response.send_message("1 이상 회수해주세요.", ephemeral=True)
@@ -972,6 +993,12 @@ class Economy(commands.Cog):
             )
         elif isinstance(error, app_commands.MissingPermissions):
             await interaction.response.send_message("관리자 권한이 필요한 명령어예요.", ephemeral=True)
+        elif isinstance(error, app_commands.CheckFailure):
+            # owner_only() 가 막은 경우. 명령은 목록에 보이지만(서버 관리자에게)
+            # 실행은 안 되므로, 왜 안 되는지 알려준다.
+            await interaction.response.send_message(
+                "이 명령은 **서버 소유자**만 쓸 수 있어요.", ephemeral=True
+            )
 
 
 async def setup(bot: commands.Bot):
