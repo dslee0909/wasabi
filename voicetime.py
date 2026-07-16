@@ -93,6 +93,14 @@ def db():
         conn.execute("ALTER TABLE balances ADD COLUMN rod INTEGER NOT NULL DEFAULT 0")
     except sqlite3.OperationalError:
         pass
+    try:
+        conn.execute("ALTER TABLE balances ADD COLUMN rod_enhance INTEGER NOT NULL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("ALTER TABLE balances ADD COLUMN fish_earned INTEGER NOT NULL DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
     return conn
 
 
@@ -270,6 +278,33 @@ def fishing_leaderboard(guild_id: int, limit: int = 10):
     return rows
 
 
+def get_fishing_stats(guild_id: int, user_id: int):
+    """(총 마릿수, 반짝이 수, 도감 종수)."""
+    conn = db()
+    row = conn.execute(
+        "SELECT COALESCE(SUM(count),0), "
+        "COALESCE(SUM(CASE WHEN shiny=1 THEN count ELSE 0 END),0), "
+        "COUNT(DISTINCT fish_key) FROM fish_catches WHERE guild_id=? AND user_id=?",
+        (guild_id, user_id),
+    ).fetchone()
+    conn.close()
+    return int(row[0]), int(row[1]), int(row[2])
+
+
+def fishing_rank(guild_id: int, user_id: int):
+    """(내 순위, 전체 인원) — 총 마릿수 기준."""
+    conn = db()
+    rows = conn.execute(
+        "SELECT user_id FROM fish_catches WHERE guild_id=? GROUP BY user_id ORDER BY SUM(count) DESC",
+        (guild_id,),
+    ).fetchall()
+    conn.close()
+    for i, (uid,) in enumerate(rows, start=1):
+        if uid == user_id:
+            return i, len(rows)
+    return None, len(rows)
+
+
 def get_catches(guild_id: int, user_id: int) -> dict:
     """{(fish_key, shiny): count} 형태로 도감 데이터 반환."""
     conn = db()
@@ -365,6 +400,40 @@ def set_rod(guild_id: int, user_id: int, tier: int):
     conn = db()
     conn.execute("INSERT OR IGNORE INTO balances (guild_id, user_id) VALUES (?,?)", (guild_id, user_id))
     conn.execute("UPDATE balances SET rod=? WHERE guild_id=? AND user_id=?", (tier, guild_id, user_id))
+    conn.commit()
+    conn.close()
+
+
+def get_fish_earned(guild_id: int, user_id: int) -> int:
+    conn = db()
+    row = conn.execute(
+        "SELECT fish_earned FROM balances WHERE guild_id=? AND user_id=?", (guild_id, user_id)
+    ).fetchone()
+    conn.close()
+    return int(row[0]) if row and row[0] is not None else 0
+
+
+def add_fish_earned(guild_id: int, user_id: int, amount: int):
+    conn = db()
+    conn.execute("INSERT OR IGNORE INTO balances (guild_id, user_id) VALUES (?,?)", (guild_id, user_id))
+    conn.execute("UPDATE balances SET fish_earned = fish_earned + ? WHERE guild_id=? AND user_id=?", (amount, guild_id, user_id))
+    conn.commit()
+    conn.close()
+
+
+def get_rod_enhance(guild_id: int, user_id: int) -> int:
+    conn = db()
+    row = conn.execute(
+        "SELECT rod_enhance FROM balances WHERE guild_id=? AND user_id=?", (guild_id, user_id)
+    ).fetchone()
+    conn.close()
+    return int(row[0]) if row and row[0] is not None else 0
+
+
+def set_rod_enhance(guild_id: int, user_id: int, level: int):
+    conn = db()
+    conn.execute("INSERT OR IGNORE INTO balances (guild_id, user_id) VALUES (?,?)", (guild_id, user_id))
+    conn.execute("UPDATE balances SET rod_enhance=? WHERE guild_id=? AND user_id=?", (level, guild_id, user_id))
     conn.commit()
     conn.close()
 

@@ -9,13 +9,12 @@
 """
 
 import io
-import os
 import random
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
-EMOJI_FONT = r"C:\Windows\Fonts\seguiemj.ttf"
-TEXT_FONT = r"C:\Windows\Fonts\malgunbd.ttf"
+import fonts
+
 SYMBOLS = ["🍒", "🍋", "🔔", "⭐", "🍀", "💎"]
 
 CELL = 100
@@ -40,18 +39,8 @@ WIN_C = (90, 210, 120, 255)
 LOSE_C = (150, 150, 160, 255)
 
 
-def _efont(size):
-    try:
-        return ImageFont.truetype(EMOJI_FONT, size)
-    except OSError:
-        return ImageFont.load_default()
-
-
-def _tfont(size):
-    try:
-        return ImageFont.truetype(TEXT_FONT, size)
-    except OSError:
-        return ImageFont.load_default()
+_efont = fonts.emoji_font
+_tfont = fonts.text_font
 
 
 def random_grid():

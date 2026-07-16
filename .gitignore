@@ -1,6 +1,10 @@
 # 비밀값 — 절대 커밋 금지!
 .env
 
+# Windows 동봉 폰트 — 재배포 라이선스가 없으므로 커밋하지 않는다.
+# 봇을 다른 기기로 옮길 땐 이 파일만 따로 복사할 것 (없으면 이모지가 □ 로 나옴).
+assets/fonts/seguiemj.ttf
+
 # 파이썬
 __pycache__/
 *.py[cod]
@@ -12,6 +16,9 @@ env/
 # 데이터베이스 (활동시간/레벨)
 data.db
 *.sqlite3
+
+# /재롱 GIF -> WebP 변환 캐시 (원본에서 자동 생성됨)
+assets/.webp_cache/
 
 # 서버별 설정 (자동 역할 등 런타임 상태)
 config.json

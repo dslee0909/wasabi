@@ -1,0 +1,29 @@
+# 와사비 봇 systemd 서비스 (start_bot.bat 의 재시작 루프를 대체)
+#
+# __USER__ / __DIR__ 은 setup_pi.sh 가 실제 값으로 치환해서 설치한다.
+# 수동 설치 시:
+#   sudo cp wasabi-bot.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now wasabi-bot
+
+[Unit]
+Description=Wasabi Discord Bot
+# 네트워크가 실제로 붙은 뒤 시작 (부팅 직후 디스코드 접속 실패 방지)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__DIR__
+ExecStart=__DIR__/.venv/bin/python -u bot.py
+
+# bat 의 "5초 뒤 재시작" 과 동일. 죽으면 항상 되살린다.
+Restart=always
+RestartSec=5
+
+# 로그는 journalctl -u wasabi-bot 로 본다. 한글이 깨지지 않게 UTF-8 고정.
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONIOENCODING=utf-8
+
+[Install]
+WantedBy=multi-user.target

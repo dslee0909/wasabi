@@ -23,6 +23,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 import dexcard
+import forge
 import rodcard
 import slotimage
 import voicetime as vt
@@ -37,18 +38,44 @@ SHINY_MULT = 10      # 반짝이는 물고기 가격 배수
 SHINY_DIR = os.path.join(ASSETS_DIR, "shiny")  # 반짝이 이미지 폴더 (같은 파일명)
 
 ROD_DIR = os.path.join(ASSETS_DIR, "rods")
+FORGE_SUCCESS_BG = os.path.join(ASSETS_DIR, "forge_success.png")  # 강화 성공 배경 (선택)
+FORGE_FAIL_BG = os.path.join(ASSETS_DIR, "forge_fail.png")        # 강화 실패 배경 (선택)
+FORGE_IDLE_BG = os.path.join(ASSETS_DIR, "forge_idle.png")        # 강화 대기화면 배경 (선택)
+STATUS_BG = os.path.join(ASSETS_DIR, "status_bg.png")            # 낚시 스탯창 배경 (선택)
 
 # 낚싯대 상점 (tier: 이름, 이모지, 가격, 코인배수, 반짝이확률, 쿨다운, 이미지파일)
 RODS = {
-    0: {"name": "기본 낚싯대", "emoji": "🎣", "price": 0,         "mult": 1.0, "shiny": 0.08, "cd": 2.0, "img": "rod_0_basic.png"},
-    1: {"name": "나무 낚싯대", "emoji": "🪵", "price": 50_000,    "mult": 1.2, "shiny": 0.10, "cd": 2.0, "img": "rod_1_wood.png"},
-    2: {"name": "강철 낚싯대", "emoji": "⚙️", "price": 150_000,   "mult": 1.5, "shiny": 0.12, "cd": 1.8, "img": "rod_2_steel.png"},
-    3: {"name": "황금 낚싯대", "emoji": "🥇", "price": 300_000,   "mult": 2.0, "shiny": 0.15, "cd": 1.5, "img": "rod_3_gold.png"},
-    4: {"name": "다이아 낚싯대", "emoji": "💎", "price": 800_000,   "mult": 2.5, "shiny": 0.18, "cd": 1.2, "img": "rod_4_diamond.png"},
-    5: {"name": "용왕의 낚싯대", "emoji": "🐉", "price": 2_200_000, "mult": 3.0, "shiny": 0.20, "cd": 1.0, "img": "rod_5_dragon.png"},
-    6: {"name": "전설의 낚싯대", "emoji": "👑", "price": 8_000_000, "mult": 4.0, "shiny": 0.23, "cd": 0.8, "img": "rod_6_legendary.png"},
+    0: {"name": "기본 낚싯대", "emoji": "🎣", "price": 0,         "mult": 1.0, "shiny": 0.08, "cd": 2.0, "cap": 0,  "img": "rod_0_basic.png"},
+    1: {"name": "나무 낚싯대", "emoji": "🪵", "price": 50_000,    "mult": 1.2, "shiny": 0.10, "cd": 2.0, "cap": 2,  "img": "rod_1_wood.png"},
+    2: {"name": "강철 낚싯대", "emoji": "⚙️", "price": 150_000,   "mult": 1.5, "shiny": 0.11, "cd": 1.8, "cap": 4,  "img": "rod_2_steel.png"},
+    3: {"name": "황금 낚싯대", "emoji": "🥇", "price": 300_000,   "mult": 2.0, "shiny": 0.12, "cd": 1.5, "cap": 6,  "img": "rod_3_gold.png"},
+    4: {"name": "다이아 낚싯대", "emoji": "💎", "price": 800_000,   "mult": 2.5, "shiny": 0.14, "cd": 1.2, "cap": 8,  "img": "rod_4_diamond.png"},
+    5: {"name": "용왕의 낚싯대", "emoji": "🐉", "price": 2_200_000, "mult": 3.0, "shiny": 0.16, "cd": 1.0, "cap": 10, "img": "rod_5_dragon.png"},
+    6: {"name": "전설의 낚싯대", "emoji": "👑", "price": 8_000_000, "mult": 4.0, "shiny": 0.18, "cd": 0.8, "cap": 12, "img": "rod_6_legendary.png"},
+    7: {"name": "입고중", "emoji": "⚡", "price": '?', "mult": 5.0, "shiny": 0.20, "cd": 0.5, "cap": 15, "img": "rod_7_god.png"}
 }
-ROD_TIERS = (1, 2, 3, 4, 5, 6)
+ROD_TIERS = (1, 2, 3, 4, 5, 6, 7)  # 상점에 나오는 낚싯대 티어
+
+ENHANCE_BONUS = 0.015  # 강화 +1당 코인 +1.5% (미미)
+
+
+def enhance_cost(level: int) -> int:
+    """강화도(level)에서 +1 하는 비용. 낚싯대 티어와 무관하게 고정 (강화도는 승계되므로 일관성 유지)."""
+    return 20_000 * (level + 1)
+
+
+def enhance_rate(level: int) -> float:
+    """현재 강화레벨 level 에서 +1 성공 확률 (레벨 오를수록 낮아짐)."""
+    return max(0.15, 1.0 - level * 0.08)
+
+
+# 실제 구매 가능한 티어 (가격이 정수인 것만; '입고중' 등 문자열 가격 제외)
+BUYABLE_TIERS = tuple(t for t in ROD_TIERS if isinstance(RODS[t]["price"], int))
+
+
+def _price_label(tier: int) -> str:
+    p = RODS[tier]["price"]
+    return f"{p:,} 코인" if isinstance(p, int) else "🚧 입고중"
 
 POLICE_ID = 0  # 경찰서 금고를 담는 가상 계정 (balances 테이블의 user_id 0)
 
@@ -102,14 +129,25 @@ def coins(n: int) -> str:
 
 
 def _slot_spin():
-    """슬롯 3릴을 돌려 (릴목록, 배수, 결과문구) 반환. 문구는 이미지에 그리므로 이모지 없이."""
-    reels = [random.choice(SLOT_SYMBOLS) for _ in range(3)]
-    if reels[0] == reels[1] == reels[2]:
-        mult = 15 if reels[0] == "💎" else (10 if reels[0] == "🍀" else 5)
-        result = "JACKPOT!"
-    elif reels[0] == reels[1] or reels[1] == reels[2] or reels[0] == reels[2]:
-        mult, result = 1.8, "두 개 일치!"  # ~96% 환수율 (4% 하우스 엣지)
-    else:
+    """가중 추첨으로 결과를 먼저 정하고 릴을 거기에 맞춰 생성 (환수율 ≈96% 정밀 제어).
+    반환: (릴 3개, 배수, 결과문구). 확률은 아래 주석 참고."""
+    x = random.random()
+    others = [s for s in SLOT_SYMBOLS if s not in ("💎", "🍀")]
+    if x < 0.004:                     # 0.4%  💎💎💎 x8
+        reels, mult, result = ["💎"] * 3, 8, "JACKPOT!"
+    elif x < 0.010:                   # 0.6%  🍀🍀🍀 x5
+        reels, mult, result = ["🍀"] * 3, 5, "JACKPOT!"
+    elif x < 0.030:                   # 2%    그 외 3개 일치 x3
+        s = random.choice(others)
+        reels, mult, result = [s] * 3, 3, "JACKPOT!"
+    elif x < 0.450:                   # 42%   2개 일치 x2
+        a = random.choice(SLOT_SYMBOLS)
+        b = random.choice([s for s in SLOT_SYMBOLS if s != a])
+        reels = [a, a, b]
+        random.shuffle(reels)
+        mult, result = 2, "두 개 일치!"
+    else:                             # 55%   꽝
+        reels = random.sample(SLOT_SYMBOLS, 3)  # 서로 다른 3개
         mult, result = 0, "꽝"
     return reels, mult, result
 
@@ -177,6 +215,25 @@ class FishView(discord.ui.View):
         await self.cog._do_fish(interaction, from_button=True)
 
 
+class ForgeView(discord.ui.View):
+    """대장간 강화 패널의 [🔨 강화하기] 버튼. 본인만 사용."""
+
+    def __init__(self, cog, owner_id: int):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.owner_id = owner_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("본인 대장간에서만 강화할 수 있어요. `/강화` 로 시작하세요.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="강화하기", emoji="🔨", style=discord.ButtonStyle.danger)
+    async def forge_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._do_forge(interaction)
+
+
 class Economy(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -205,6 +262,52 @@ class Economy(commands.Cog):
         description="은행 이자 설정 (관리자)",
         default_permissions=discord.Permissions(manage_guild=True),
     )
+
+    낚시관리 = app_commands.Group(
+        name="낚시관리",
+        description="낚싯대/강화 회수·설정 (관리자)",
+        default_permissions=discord.Permissions(manage_guild=True),
+    )
+
+    @낚시관리.command(name="낚싯대", description="멤버의 낚싯대 티어를 설정합니다")
+    @app_commands.describe(멤버="대상", 티어="0=기본, 1~6")
+    @app_commands.choices(티어=[
+        app_commands.Choice(name=f"{t}: {RODS[t]['name']}", value=t) for t in range(0, 7)
+    ])
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def admin_set_rod(self, interaction: discord.Interaction, 멤버: discord.Member, 티어: app_commands.Choice[int]):
+        gid = interaction.guild.id
+        tier = 티어.value
+        vt.set_rod(gid, 멤버.id, tier)
+        # 강화가 새 티어 상한을 넘으면 상한으로 낮춤
+        if vt.get_rod_enhance(gid, 멤버.id) > RODS[tier]["cap"]:
+            vt.set_rod_enhance(gid, 멤버.id, RODS[tier]["cap"])
+        await interaction.response.send_message(
+            f"✅ {멤버.mention} 의 낚싯대를 **{RODS[tier]['name']}** 로 설정했어요.", ephemeral=True
+        )
+
+    @낚시관리.command(name="강화", description="멤버의 강화 수치를 설정합니다")
+    @app_commands.describe(멤버="대상", 레벨="설정할 강화 레벨")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def admin_set_enhance(self, interaction: discord.Interaction, 멤버: discord.Member, 레벨: int):
+        gid = interaction.guild.id
+        cap = RODS[vt.get_rod(gid, 멤버.id)]["cap"]
+        lvl = max(0, min(레벨, cap))
+        vt.set_rod_enhance(gid, 멤버.id, lvl)
+        await interaction.response.send_message(
+            f"✅ {멤버.mention} 의 강화를 **+{lvl}** 로 설정했어요. (현재 낚싯대 최대 +{cap})", ephemeral=True
+        )
+
+    @낚시관리.command(name="회수", description="멤버의 낚싯대를 기본으로 되돌립니다 (강화도 초기화)")
+    @app_commands.describe(멤버="대상")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def admin_reset_rod(self, interaction: discord.Interaction, 멤버: discord.Member):
+        gid = interaction.guild.id
+        vt.set_rod(gid, 멤버.id, 0)
+        vt.set_rod_enhance(gid, 멤버.id, 0)
+        await interaction.response.send_message(
+            f"✅ {멤버.mention} 의 낚싯대를 **회수**했어요. (기본 낚싯대 + 강화 0 초기화)", ephemeral=True
+        )
 
     # ---- 은행 이자 (12시간마다) ----
     @tasks.loop(minutes=30)
@@ -352,16 +455,19 @@ class Economy(commands.Cog):
         my = vt.get_rod(interaction.guild.id, interaction.user.id)
         cur = RODS[my]
 
-        # 낚싯대 이미지가 4개 다 있으면 이미지 상점, 아니면 텍스트
-        all_imgs = all(os.path.exists(os.path.join(ROD_DIR, RODS[t]["img"])) for t in ROD_TIERS)
+        # 구매 가능한 티어(1~6) 이미지가 다 있으면 이미지 상점, 아니면 텍스트
+        # (입고중 등 가격 미정 티어는 아트가 없어도 됨 — render_shop이 썸네일을 비움)
+        all_imgs = all(os.path.exists(os.path.join(ROD_DIR, RODS[t]["img"])) for t in BUYABLE_TIERS)
         if all_imgs:
+            # 이미지 안에는 이모지가 두부(□)로 나오므로 이모지 없는 라벨 사용
             entries = [{
                 "name": RODS[t]["name"], "img": RODS[t]["img"],
-                "price_str": f"{RODS[t]['price']:,} 코인",
+                "price_str": ("입고중" if not isinstance(RODS[t]["price"], int)
+                              else f"{RODS[t]['price']:,} 코인"),
                 "effect": f"x{RODS[t]['mult']} · 반짝이 {int(RODS[t]['shiny']*100)}% · 쿨 {RODS[t]['cd']}s",
                 "owned": my >= t,
             } for t in ROD_TIERS]
-            title = f"🏪 낚싯대 상점   (장착: {cur['name']})"
+            title = f"낚싯대 상점   (장착: {cur['name']})"
             try:
                 buf = rodcard.render_shop(entries, title, ROD_DIR)
                 await interaction.response.send_message(
@@ -374,7 +480,7 @@ class Economy(commands.Cog):
         lines = []
         for tier in ROD_TIERS:
             r = RODS[tier]
-            status = "✅ 보유중" if my >= tier else f"💰 {coins(r['price'])}"
+            status = "✅ 보유중" if my >= tier else _price_label(tier)
             lines.append(
                 f"{r['emoji']} **{r['name']}** — {status}\n"
                 f"┗ 코인 **x{r['mult']}** · 반짝이 **{int(r['shiny']*100)}%** · 쿨 **{r['cd']}초**"
@@ -387,12 +493,15 @@ class Economy(commands.Cog):
     @app_commands.describe(낚싯대="구매할 낚싯대")
     @app_commands.choices(낚싯대=[
         app_commands.Choice(name=f"{RODS[t]['name']} ({RODS[t]['price']:,}원)", value=t)
-        for t in ROD_TIERS
+        for t in BUYABLE_TIERS
     ])
     async def buy(self, interaction: discord.Interaction, 낚싯대: app_commands.Choice[int]):
         gid, uid = interaction.guild.id, interaction.user.id
         tier = 낚싯대.value
         r = RODS[tier]
+        if not isinstance(r["price"], int):
+            await interaction.response.send_message("아직 입고 전인 낚싯대예요. 조금만 기다려주세요! 🚧", ephemeral=True)
+            return
         my = vt.get_rod(gid, uid)
         if my >= tier:
             await interaction.response.send_message(
@@ -415,6 +524,141 @@ class Economy(commands.Cog):
             await interaction.response.send_message(text, file=discord.File(rod_path, "rod.png"))
         else:
             await interaction.response.send_message(text)
+
+    # ---- 낚싯대 강화 / 상태 ----
+    @app_commands.command(name="낚시스탯", description="낚시 종합 스탯 (낚싯대·효과·강화·기록·순위·자산)")
+    @app_commands.describe(멤버="확인할 멤버 (비우면 나)")
+    async def rod_status(self, interaction: discord.Interaction, 멤버: discord.Member = None):
+        member = 멤버 or interaction.user
+        gid = interaction.guild.id
+        tier = vt.get_rod(gid, member.id)
+        enh = vt.get_rod_enhance(gid, member.id)
+        r = RODS[tier]
+        bonus = enh * ENHANCE_BONUS
+        eff_mult = r["mult"] * (1 + bonus)
+
+        total, shiny_cnt, species = vt.get_fishing_stats(gid, member.id)
+        rank, _ = vt.fishing_rank(gid, member.id)
+        species_total = sum(1 for f in FISH if f[2] > 0)
+        assets = vt.get_balance(gid, member.id) + vt.get_bank(gid, member.id)
+        earned = vt.get_fish_earned(gid, member.id)
+
+        name = r["name"] + (f" +{enh}" if enh else "")
+        sections = [
+            ("낚싯대 효과", (90, 205, 120), [
+                ("💰", f"코인 배수  x{eff_mult:.2f}" + (f"  (+강화 {int(bonus*100)}%)" if enh else "")),
+                ("✨", f"반짝이 확률  {int(r['shiny']*100)}%"),
+                ("⏱️", f"쿨다운  {r['cd']}초"),
+                ("🔨", f"강화  +{enh} / 최대 +{r['cap']}"),
+            ]),
+            ("낚시 기록", (85, 160, 235), [
+                ("🐟", f"총 낚은 물고기  {total:,}마리"),
+                ("🌟", f"반짝이  {shiny_cnt:,}마리"),
+                ("📖", f"도감  {species} / {species_total}종"),
+                ("🏆", f"낚시 순위  " + (f"#{rank}" if rank else "-")),
+            ]),
+            ("자산", (235, 180, 70), [
+                ("👛", f"총 자산  {assets:,} 코인"),
+                ("🎣", f"낚시 누적 수익  {earned:,} 코인"),
+            ]),
+        ]
+        title = f"{member.display_name} 님의 낚시 스탯"
+        rod_path = os.path.join(ROD_DIR, r["img"])
+        try:
+            bg = STATUS_BG if os.path.exists(STATUS_BG) else None
+            buf = rodcard.render_profile(rod_path, title, name, enh, sections, bg_path=bg)
+            await interaction.response.send_message(file=discord.File(buf, "fishing_status.png"))
+        except Exception as e:
+            print(f"[경고] 낚시 스탯 이미지 실패: {e}")
+            desc = "\n".join(f"**{h}**\n" + "\n".join(f"{em} {t}" for em, t in lines) for h, _, lines in sections)
+            embed = discord.Embed(title=title, description=desc, color=discord.Color.gold())
+            await interaction.response.send_message(embed=embed)
+
+    def _forge_status_file(self, gid: int, uid: int, bg_path: str = None) -> discord.File:
+        tier = vt.get_rod(gid, uid)
+        enh = vt.get_rod_enhance(gid, uid)
+        r = RODS[tier]
+        bonus = enh * ENHANCE_BONUS
+        name = r["name"] + (f" +{enh}" if enh else "")
+        effects = [
+            ("💰", f"코인 배수  x{r['mult'] * (1 + bonus):.2f}"),
+            ("✨", f"반짝이 확률  {int(r['shiny']*100)}%"),
+            ("🔨", f"강화  +{enh} / 최대 +{r['cap']}"),
+        ]
+        buf = rodcard.render_status(os.path.join(ROD_DIR, r["img"]), name, enh, effects, bg_path=bg_path)
+        return discord.File(buf, "forge.png")
+
+    def _forge_panel_text(self, gid: int, uid: int, result: str = "") -> str:
+        tier = vt.get_rod(gid, uid)
+        enh = vt.get_rod_enhance(gid, uid)
+        r = RODS[tier]
+        head = (result + "\n") if result else ""
+        if enh >= r["cap"]:
+            return f"{head}🏆 **{r['name']} +{enh}** — 최대 강화 달성!"
+        cost = enhance_cost(enh)
+        rate = enhance_rate(enh)
+        wallet = vt.get_balance(gid, uid)
+        return (f"{head}🔨 **대장간** — {r['name']} **+{enh}** → +{enh+1}\n"
+                f"성공확률 **{int(rate*100)}%** · 비용 **{coins(cost)}** · 지갑 {coins(wallet)}\n"
+                f"아래 **🔨 강화하기** 버튼을 눌러 두드리세요!")
+
+    @app_commands.command(name="강화", description="대장간에서 장착 낚싯대를 강화합니다 (버튼으로 두드리기)")
+    async def enhance(self, interaction: discord.Interaction):
+        gid, uid = interaction.guild.id, interaction.user.id
+        if vt.get_rod(gid, uid) == 0:
+            await interaction.response.send_message("먼저 `/상점` 에서 낚싯대를 사세요! (기본 낚싯대는 강화 불가)", ephemeral=True)
+            return
+        enh = vt.get_rod_enhance(gid, uid)
+        r = RODS[vt.get_rod(gid, uid)]
+        view = ForgeView(self, uid) if enh < r["cap"] else None
+        idle_bg = FORGE_IDLE_BG if os.path.exists(FORGE_IDLE_BG) else None
+        await interaction.response.send_message(
+            content=self._forge_panel_text(gid, uid),
+            file=self._forge_status_file(gid, uid, bg_path=idle_bg),
+            view=view,
+        )
+
+    async def _do_forge(self, interaction: discord.Interaction):
+        gid, uid = interaction.guild.id, interaction.user.id
+        tier = vt.get_rod(gid, uid)
+        r = RODS[tier]
+        enh = vt.get_rod_enhance(gid, uid)
+        if enh >= r["cap"]:
+            await interaction.response.send_message("이미 최대 강화예요!", ephemeral=True)
+            return
+        cost = enhance_cost(enh)
+        if vt.get_balance(gid, uid) < cost:
+            await interaction.response.send_message(f"코인이 부족해요. (비용 {coins(cost)})", ephemeral=True)
+            return
+
+        vt.add_balance(gid, uid, -cost)  # 성공/실패 무관 소모
+        await interaction.response.defer()
+        message = interaction.message
+
+        # 망치질 애니메이션
+        gif = forge.render_forge(os.path.join(ROD_DIR, r["img"]))
+        await message.edit(
+            content=f"🔨 **{r['name']} +{enh}** 두드리는 중...  땅! 땅!",
+            attachments=[discord.File(gif, "forge.gif")], view=None,
+        )
+        await asyncio.sleep(1.6)
+
+        rate = enhance_rate(enh)
+        if random.random() < rate:
+            vt.set_rod_enhance(gid, uid, enh + 1)
+            result = f"✨ **강화 성공!** → **+{enh + 1}**"
+            bg = FORGE_SUCCESS_BG
+        else:
+            result = f"💥 **강화 실패...** (+{enh} 유지)"
+            bg = FORGE_FAIL_BG
+
+        new_enh = vt.get_rod_enhance(gid, uid)
+        view = ForgeView(self, uid) if new_enh < r["cap"] else None
+        await message.edit(
+            content=self._forge_panel_text(gid, uid, result=result),
+            attachments=[self._forge_status_file(gid, uid, bg_path=bg)],
+            view=view,
+        )
 
     @app_commands.command(name="낚시순위", description="물고기를 가장 많이 낚은 순위 TOP 10")
     async def fish_rank(self, interaction: discord.Interaction):
@@ -442,6 +686,7 @@ class Economy(commands.Cog):
         gid = interaction.guild.id
         key = (gid, user.id)
         rod = RODS[vt.get_rod(gid, user.id)]  # 장착 낚싯대 효과
+        enh = vt.get_rod_enhance(gid, user.id)  # 강화 레벨
         left = self._cooldown_left(self._fish_cd, key, rod["cd"])
         if left:
             await interaction.response.send_message(f"⏳ {left:.1f}초 후에 다시 낚시할 수 있어요.", ephemeral=True)
@@ -459,11 +704,13 @@ class Economy(commands.Cog):
         else:
             path = os.path.join(ASSETS_DIR, img)
         if value > 0:
-            value = int(value * rod["mult"])  # 낚싯대 코인 배수
+            value = int(value * rod["mult"] * (1 + enh * ENHANCE_BONUS))  # 낚싯대 배수 + 강화 보너스
             vt.add_catch(gid, user.id, name, shiny)  # 도감 기록
+            vt.add_fish_earned(gid, user.id, value)  # 낚시 누적 수익
         file = discord.File(path, filename="fish.png") if os.path.exists(path) else None
 
-        head = f"🎣 **{user.display_name}** 님의 낚시  ·  {rod['emoji']} {rod['name']}"
+        plus = f" +{enh}" if enh else ""
+        head = f"🎣 **{user.display_name}** 님의 낚시  ·  {rod['emoji']} {rod['name']}{plus}"
         if value <= 0:
             text = f"{head}\n{emoji} **{name}**... 이번엔 허탕이에요!"
         elif shiny:
@@ -552,15 +799,19 @@ class Economy(commands.Cog):
             return
         vt.add_balance(gid, user.id, -bet)  # 베팅 즉시 차감 (중복 클릭 방지)
 
+        # GIF 렌더는 느린 기기(라즈베리파이 등)에서 수 초까지 걸린다. 응답부터 열어
+        # 3초 제한을 피하고(슬래시는 '생각 중', 버튼은 조용히 — discord.py 가 알아서 구분),
+        # 렌더는 스레드로 넘겨 그리는 동안 봇이 다른 명령어를 계속 받게 한다.
+        await interaction.response.defer()
+
         reels, mult, result = _slot_spin()
-        gif_buf, final_grid = slotimage.spin_stop_gif(reels, slow=slow)  # 순차 정지 GIF
+        gif_buf, final_grid = await asyncio.to_thread(slotimage.spin_stop_gif, reels, slow=slow)
         content = f"🎰 **{coins(bet)}** 베팅!" + ("  😳 두근두근..." if slow else "")
         if from_button:
-            await interaction.response.defer()
             message = interaction.message
             await message.edit(content=content, attachments=[discord.File(gif_buf, "slot.gif")], view=None)
         else:
-            await interaction.response.send_message(content=content, file=discord.File(gif_buf, "slot.gif"))
+            await interaction.edit_original_response(content=content, attachments=[discord.File(gif_buf, "slot.gif")])
             message = await interaction.original_response()
 
         await asyncio.sleep(2.3 if slow else 1.5)  # 릴이 순차로 멈추는 동안 대기
