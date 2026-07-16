@@ -55,6 +55,11 @@ def owner_only():
 DEFAULT_INTEREST = 0.01  # 12시간마다 1%
 INTEREST_PERIOD = 12 * 3600  # 12시간
 
+# 이자는 잔액에 비례하는 복리라 상한이 없으면 지수적으로 폭주한다.
+# 실제로 한 서버에서 이율이 100% 로 설정돼(= 12시간마다 2배) 열흘 만에
+# 64만원이 3,332억이 됐다. 아래 상한이 그 재발을 막는다.
+MAX_INTEREST_PCT = 5.0  # 12시간마다 최대 5%
+
 SHINY_MULT = 10      # 반짝이는 물고기 가격 배수
 SHINY_DIR = os.path.join(ASSETS_DIR, "shiny")  # 반짝이 이미지 폴더 (같은 파일명)
 
@@ -339,6 +344,13 @@ class Economy(commands.Cog):
             rate = cfg.get("bank_interest_rate", DEFAULT_INTEREST)
             if rate <= 0:
                 continue
+            # 명령어에 상한이 생기기 전에 저장된 값이나 손으로 고친 config 가 있을 수 있다.
+            # 적용 직전에 한 번 더 조인다 — 여기가 실제로 돈을 찍는 지점이다.
+            capped = min(rate, MAX_INTEREST_PCT / 100)
+            if capped != rate:
+                print(f"[경고] {guild.name}({guild.id}) 이자율 {rate*100:g}% 는 상한을 넘어 "
+                      f"{MAX_INTEREST_PCT:g}% 로 제한합니다. /은행 이자설정 으로 다시 정해주세요.")
+                rate = capped
             last = cfg.get("bank_interest_last", 0)
             if last == 0:
                 # 처음 만난 서버는 이자를 붙이지 않고 시계만 시작
@@ -352,11 +364,18 @@ class Economy(commands.Cog):
         await self.bot.wait_until_ready()
 
     @은행.command(name="이자설정", description="은행 이자율(12시간마다 %)을 설정합니다")
-    @app_commands.describe(이율="12시간마다 붙는 이자 % (예: 1 = 1%, 0 = 이자 끄기)")
+    @app_commands.describe(이율=f"12시간마다 붙는 이자 % (0 = 끄기, 최대 {MAX_INTEREST_PCT:g})")
     @owner_only()
-    async def set_interest(self, interaction: discord.Interaction, 이율: float):
-        if 이율 < 0:
-            await interaction.response.send_message("0 이상으로 설정해주세요.", ephemeral=True)
+    async def set_interest(
+        self, interaction: discord.Interaction,
+        # Range 를 쓰면 디스코드가 입력 단계에서 막아준다 (아래 검사는 그래도 남겨둔다)
+        이율: app_commands.Range[float, 0.0, MAX_INTEREST_PCT],
+    ):
+        if not 0 <= 이율 <= MAX_INTEREST_PCT:
+            await interaction.response.send_message(
+                f"0 ~ {MAX_INTEREST_PCT:g}% 사이로 설정해주세요. "
+                f"복리라서 조금만 높아도 금방 폭주해요.", ephemeral=True
+            )
             return
         update_guild_config(interaction.guild.id, {"bank_interest_rate": 이율 / 100})
         msg = "이자를 껐어요." if 이율 == 0 else f"이제 **12시간마다 {이율}%** 이자가 붙어요."
