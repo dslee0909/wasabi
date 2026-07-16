@@ -1,0 +1,14 @@
+# data.db 백업 (wasabi-backup.timer 가 매일 실행)
+# __USER__ / __DIR__ 은 setup_pi.sh 가 치환한다.
+
+[Unit]
+Description=Wasabi bot data.db 백업
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__DIR__
+# 봇의 venv 가 아니라 시스템 python3 를 쓴다 — venv 가 깨져도 백업은 돌아야 하고,
+# 스크립트가 표준 라이브러리만 쓰므로 가능하다.
+ExecStart=/usr/bin/python3 __DIR__/deploy/backup_db.py 30
+Environment=PYTHONIOENCODING=utf-8

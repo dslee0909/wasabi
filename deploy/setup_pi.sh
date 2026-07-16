@@ -69,11 +69,19 @@ PY
 
 # --- 4. systemd 서비스 --------------------------------------------------------
 echo "== systemd 서비스 설치"
-sed -e "s|__USER__|$RUN_USER|g" -e "s|__DIR__|$DIR|g" \
-    deploy/wasabi-bot.service | sudo tee "/etc/systemd/system/$SERVICE.service" >/dev/null
+install_unit() {  # $1: deploy/ 안의 유닛 파일명
+    sed -e "s|__USER__|$RUN_USER|g" -e "s|__DIR__|$DIR|g" \
+        "deploy/$1" | sudo tee "/etc/systemd/system/$1" >/dev/null
+}
+install_unit wasabi-bot.service
+install_unit wasabi-backup.service
+install_unit wasabi-backup.timer
 sudo systemctl daemon-reload
 sudo systemctl enable "$SERVICE" >/dev/null
 sudo systemctl restart "$SERVICE"
+
+# 매일 data.db 백업 (~/bot-backups, 최근 30개 보관)
+sudo systemctl enable --now wasabi-backup.timer >/dev/null
 
 sleep 3
 echo
@@ -83,3 +91,5 @@ echo "완료."
 echo "  로그 보기   : journalctl -u $SERVICE -f"
 echo "  재시작      : sudo systemctl restart $SERVICE"
 echo "  끄기        : sudo systemctl stop $SERVICE"
+echo "  백업 상태   : systemctl list-timers wasabi-backup"
+echo "  지금 백업   : sudo systemctl start wasabi-backup.service"
