@@ -8,12 +8,18 @@
     3) python bot.py
 """
 
+import logging
 import os
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
+
+# 프리픽스(!) 명령어를 안 쓰므로(전부 슬래시), message_content 없음 경고는 무의미 → 숨김
+logging.getLogger("discord.ext.commands.bot").addFilter(
+    lambda r: "message content intent is missing" not in r.getMessage()
+)
 
 # .env 파일에서 환경변수(토큰) 읽어오기
 load_dotenv()
