@@ -5,11 +5,12 @@
   1) 관리자가 /모집채널설정 으로 '구인구직 채널'을 지정
   2) 그 채널에서 '@역할' 멘션으로 시작하는 글이 올라오면
      → 봇이 그 글에 스레드를 자동 생성
-  3) 스레드에 안내 + [참여] 버튼 게시
-  4) [참여] 버튼 클릭 → '✋ {닉네임} 참여!' 를 스레드에 자동 게시
+  3) 스레드에 안내 + [참여][취소][쫑] 버튼 게시
+  4) [참여] → 본인 이름·아바타로 참여 메시지 게시 / [취소] → 그 메시지 삭제
+     [쫑] → 참여한 사람만, 본인 이름으로 '쫑' 메시지 게시. 다시 누르면 토글로 삭제.
 
 '@역할로 시작' 판별: 역할 멘션은 원문에서 '<@&역할ID>' 형태 → content 가 '<@&' 로 시작하는지 확인.
-[참여] 버튼은 영구(persistent) View 라 재시작 후에도 작동합니다.
+버튼은 영구(persistent) View 라 재시작 후에도 작동합니다(단, 참여/쫑 추적은 메모리라 초기화됨).
 """
 
 import discord
@@ -24,6 +25,9 @@ _webhook_cache: dict[int, discord.Webhook] = {}
 # 참여 메시지 추적: {스레드ID: {유저ID: [메시지ID, ...]}} — 취소(삭제)에 사용
 # 메모리 저장이라 봇 재시작 시 초기화됨 (파티 스레드는 단기라 실용상 충분)
 _participants: dict[int, dict[int, list[int]]] = {}
+
+# 쫑 메시지 추적: {스레드ID: {유저ID: 메시지ID}} — 토글(다시 누르면 삭제)에 사용
+_jjong_msgs: dict[int, dict[int, int]] = {}
 
 
 async def get_party_webhook(channel: discord.TextChannel):
@@ -96,7 +100,53 @@ class PartyJoinView(discord.ui.View):
             except discord.HTTPException:
                 pass
         _participants[thread.id][member.id] = []
+        # 참여 취소 시 걸어둔 쫑도 같이 정리 (고아 메시지 방지)
+        jjong_id = _jjong_msgs.get(thread.id, {}).pop(member.id, None)
+        if jjong_id:
+            try:
+                await webhook.delete_message(jjong_id, thread=thread)
+            except discord.HTTPException:
+                pass
         await interaction.response.send_message(f"참여를 취소했어요. (메시지 {deleted}건 삭제)", ephemeral=True)
+
+    @discord.ui.button(label="쫑", emoji="🔚", style=discord.ButtonStyle.primary, custom_id="party:jjong")
+    async def jjong(self, interaction: discord.Interaction, button: discord.ui.Button):
+        member = interaction.user
+        thread = interaction.channel
+        parent = thread.parent if isinstance(thread, discord.Thread) else thread
+
+        # 참여한 사람만 쫑 가능 (취소했거나 참여 기록이 없으면 불가)
+        if not _participants.get(thread.id, {}).get(member.id):
+            await interaction.response.send_message(
+                "참여한 사람만 **쫑** 할 수 있어요. 먼저 **참여** 버튼을 눌러주세요.", ephemeral=True
+            )
+            return
+
+        webhook = await get_party_webhook(parent)
+        if webhook is None:
+            await interaction.response.send_message("지금은 쫑 기능을 쓸 수 없어요.", ephemeral=True)
+            return
+
+        existing = _jjong_msgs.get(thread.id, {}).get(member.id)
+        if existing:
+            # 토글 오프: 쫑 메시지 삭제
+            try:
+                await webhook.delete_message(existing, thread=thread)
+            except discord.HTTPException:
+                pass
+            _jjong_msgs[thread.id].pop(member.id, None)
+            await interaction.response.send_message("쫑을 취소했어요.", ephemeral=True)
+        else:
+            # 토글 온: 쫑 메시지 게시 (본인 이름·아바타로)
+            await interaction.response.defer()
+            msg = await webhook.send(
+                content="쫑이요! 🔚",
+                username=member.display_name,
+                avatar_url=member.display_avatar.url,
+                thread=thread,
+                wait=True,
+            )
+            _jjong_msgs.setdefault(thread.id, {})[member.id] = msg.id
 
 
 class Party(commands.Cog):
