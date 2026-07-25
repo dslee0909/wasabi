@@ -201,6 +201,38 @@ class Leveling(commands.Cog):
         update_guild_config(interaction.guild.id, {"leveling_excluded_channels": excluded})
         await interaction.response.send_message(f"✅ **{채널.name}** 을(를) 다시 집계해요.", ephemeral=True)
 
+    @레벨설정.command(name="제외목록", description="시간 집계에서 제외된 음성채널을 모두 봅니다")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def list_excluded(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        excluded = get_guild_config(guild.id).get("leveling_excluded_channels", [])
+
+        lines, stale = [], 0
+        for cid in excluded:
+            ch = guild.get_channel(cid)
+            if ch is None:
+                # 봇이 없는 사이 채널이 삭제되면 ID만 남는다 (제외해제로 정리 가능)
+                lines.append(f"⚠️ 삭제된 채널 (`{cid}`)")
+                stale += 1
+            else:
+                lines.append(f"🔇 {ch.mention}")
+
+        body = "\n".join(lines) if lines else "제외된 채널이 없어요. 모든 음성채널이 집계돼요."
+        embed = discord.Embed(
+            title="🔇 음성 시간 집계 제외 채널",
+            description=body,
+            color=discord.Color.orange(),
+        )
+        # 채널 제외 외에 항상 적용되는 규칙도 함께 안내
+        embed.add_field(
+            name="이 채널들은 명령어와 무관하게 항상 제외",
+            value=f"닉네임이 `{vt.SPECTATE_PREFIX.strip()}` 로 시작하는 관전 멤버",
+            inline=False,
+        )
+        if stale:
+            embed.set_footer(text=f"삭제된 채널 {stale}개 — /레벨설정 제외해제 로 정리할 수 있어요.")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
     @레벨설정.command(name="곡선", description="레벨업 곡선을 조정합니다 (선형/비선형, 속도)")
     @app_commands.describe(
         기준시간="Lv.1 도달에 필요한 시간(시간). 작을수록 전체가 빨라짐 (기본 1)",
