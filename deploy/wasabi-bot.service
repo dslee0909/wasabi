@@ -21,6 +21,11 @@ ExecStart=__DIR__/.venv/bin/python -u bot.py
 Restart=always
 RestartSec=5
 
+# discord.py 는 KeyboardInterrupt(SIGINT)에서만 close()→cog_unload 로 정리한다.
+# 기본 SIGTERM 으로 죽이면 진행 중인 음성 세션이 저장되지 않으므로 SIGINT 를 보낸다.
+KillSignal=SIGINT
+TimeoutStopSec=30
+
 # 로그는 journalctl -u wasabi-bot 로 본다. 한글이 깨지지 않게 UTF-8 고정.
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONIOENCODING=utf-8

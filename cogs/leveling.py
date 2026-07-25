@@ -30,8 +30,23 @@ from store import get_guild_config, update_guild_config
 class Leveling(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        # 진행 중인 세션: {(guild_id, user_id): 시작시각}
-        self.active: dict[tuple[int, int], float] = {}
+        # 진행 중인 세션: {(guild_id, user_id): (시작시각, 채널ID)}
+        self.active: dict[tuple[int, int], tuple[float, int]] = {}
+
+    def cog_unload(self):
+        # 종료(재시작) 시 진행 중이던 음성 세션을 모두 저장한다.
+        # 이게 없으면 재시작마다 그 순간 음성 중이던 사람의 '진행 중 시간'이 유실된다.
+        # (close() 가 remove_cog 로 이 함수를 부른다 — SIGINT 종료여야 close() 가 불린다)
+        now = time.time()
+        saved = 0
+        for (gid, uid), (start, channel_id) in list(self.active.items()):
+            seconds = int(now - start)
+            if seconds > 0:
+                vt.add_session(gid, uid, seconds, channel_id=channel_id, started_at=start)
+                saved += 1
+        self.active.clear()
+        if saved:
+            print(f"[레벨] 종료 전 진행 중 음성 세션 {saved}건 저장 완료")
 
     # 레벨 시스템 관리 그룹 (관리자 전용, 목록에서 숨김)
     레벨설정 = app_commands.Group(
