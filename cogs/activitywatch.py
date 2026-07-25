@@ -28,7 +28,7 @@ DEFAULT_PROMOTE_LEVEL = 10    # promote_level 미설정 시 기준 레벨
 ACTIVITY_PERIOD_DAYS = 30     # 활동 판정 기간
 ACTIVITY_MIN_HOURS = 20       # 이 기간에 채워야 하는 음성 시간
 
-CHECK_INTERVAL_MIN = 15       # 감시 주기(분)
+CHECK_INTERVAL_MIN = 60       # 감시 주기(분). 워치리스트라 분 단위 즉시성은 불필요.
 
 
 class ActivityWatch(commands.Cog):
