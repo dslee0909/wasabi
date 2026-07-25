@@ -27,6 +27,13 @@ import voicetime as vt
 from store import get_guild_config, update_guild_config
 
 
+def bot_owner_only():
+    """봇 소유자만 통과 (서버 소유자는 불가 — economy.owner_only 와 다름)."""
+    async def predicate(interaction: discord.Interaction) -> bool:
+        return await interaction.client.is_owner(interaction.user)
+    return app_commands.check(predicate)
+
+
 class Leveling(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -275,9 +282,34 @@ class Leveling(commands.Cog):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+    @레벨설정.command(name="시간조정", description="특정 멤버의 누적 음성 시간을 더하거나 뺍니다 (봇 소유자)")
+    @app_commands.describe(멤버="대상 멤버", 시간="더할 시간(시간 단위, 음수면 차감). 예: 1.5=1시간30분")
+    @bot_owner_only()
+    async def adjust_time(self, interaction: discord.Interaction, 멤버: discord.Member, 시간: float):
+        gid, uid = interaction.guild.id, 멤버.id
+        seconds = int(시간 * 3600)
+        current = vt.total_seconds(gid, uid)
+        if seconds < 0 and -seconds > current:
+            seconds = -current  # 총합이 음수가 되지 않게 클램프
+        # 보정용 세션: channel_id·started_at 없이 넣어 듀오/골든타임 분석은 오염시키지 않고
+        # 누적(레벨)·최근시간에만 반영한다.
+        vt.add_session(gid, uid, seconds)
+        new_total = vt.total_seconds(gid, uid)
+        new_level = vt.hours_to_level(new_total / 3600, gid)
+        sign = "+" if seconds >= 0 else ""
+        await interaction.response.send_message(
+            f"✅ {멤버.mention} 의 음성 시간을 **{sign}{seconds/3600:.2f}시간** 조정했어요.\n"
+            f"누적: **{vt.format_duration(new_total)}** · **Lv.{new_level}**\n"
+            f"(레벨10 넘으면 자동 역할·정착 판정은 잠시 후 반영돼요)",
+            ephemeral=True,
+        )
+
     async def cog_app_command_error(self, interaction: discord.Interaction, error):
         if isinstance(error, app_commands.MissingPermissions):
             await interaction.response.send_message("관리자 권한이 필요한 명령어예요.", ephemeral=True)
+        elif isinstance(error, app_commands.CheckFailure):
+            # bot_owner_only 가 막은 경우 (MissingPermissions 는 위에서 먼저 처리됨)
+            await interaction.response.send_message("이 명령은 **봇 소유자**만 쓸 수 있어요.", ephemeral=True)
 
 
 async def setup(bot: commands.Bot):
