@@ -117,6 +117,13 @@ class ServerConfig(commands.Cog):
                         value=mark(self._channel_list(guild, forge)) if forge else "어디서나", inline=True)
         embed.add_field(name="​", value="​", inline=True)  # 3열 정렬용 빈칸
 
+        # ── 미달성 알림 채널 ──
+        nc = mark(self._channel(guild, cfg.get("newcomer_alert_channel_id")))
+        ac = mark(self._channel(guild, cfg.get("activity_alert_channel_id")))
+        embed.add_field(name="🌱 신입 미달성 알림", value=nc, inline=True)
+        embed.add_field(name="💤 활동 미달성 알림", value=ac, inline=True)
+        embed.add_field(name="​", value="​", inline=True)
+
         if stale["n"]:
             embed.set_footer(
                 text=f"⚠️ 삭제된 채널·역할 {stale['n']}개 — 해당 설정을 다시 지정하면 정리돼요."
