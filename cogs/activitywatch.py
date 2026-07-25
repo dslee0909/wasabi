@@ -5,11 +5,16 @@
 
 ① 신입 미달성  — 입장 2주(336h)가 지났는데 레벨10 역할이 없는 멤버
                   (레벨10 = /활동 승급 으로 지정한 promote_role. 없으면 계산 레벨로 폴백)
-② 활동 미달성  — 레벨10 역할을 가진 정착 멤버 중 최근 30일 음성이 20시간 미만
+② 활동 미달성  — 레벨10 역할을 가진 정착 멤버 중, '가장 최근 완료한 30일 기간'에
+                  음성이 20시간 미만인 멤버. 각자 레벨10 도달일(정착 기준일)부터
+                  30일씩 끊어서 정산한다 — 매 시점의 이동 창이 아니라 고정 기간.
+                  (예: 7/25 정착 → 7/25~8/24 정산, 8/24~9/23 정산 … 그 기간에 20h 미달이면 명단)
 
 역할 유무로 갈리므로 한 사람이 두 명단에 동시에 오르지 않는다.
 명단 멤버는 멘션 형태로 '이름만' 보이고 알림(핑)은 가지 않는다(allowed_mentions=none).
 """
+
+import time
 
 import discord
 from discord import app_commands
@@ -70,17 +75,30 @@ class ActivityWatch(commands.Cog):
         return out
 
     def _activity_list(self, guild: discord.Guild, cfg: dict):
-        """(member, 최근30일_음성시간) 목록 — 레벨10 보유 · 30일 음성 20h 미만."""
+        """(member, 음성시간, 기간번호) 목록 — 레벨10 정착 멤버 중, 각자 기준일부터
+        30일씩 끊어 '가장 최근 완료한 기간'의 음성이 20h 미만인 멤버.
+
+        기준일(established_at)이 없으면 지금 처음 관측한 것이므로 기록만 하고 넘어간다
+        (그 순간부터 첫 30일 기간이 시작). 첫 기간을 아직 안 끝냈으면 정산 대상 아님."""
         out = []
+        now = time.time()
+        period = ACTIVITY_PERIOD_DAYS * 86400
         limit = ACTIVITY_MIN_HOURS * 3600
         for m in guild.members:
-            if m.bot:
+            if m.bot or not self._has_level_role(guild, m, cfg):
                 continue
-            if not self._has_level_role(guild, m, cfg):
+            est = vt.get_established_at(guild.id, m.id)
+            if est is None:
+                vt.set_established_at(guild.id, m.id, now)  # 기준일 기록 → 첫 기간 시작
                 continue
-            secs = vt.voice_seconds_days(guild.id, m.id, ACTIVITY_PERIOD_DAYS)
+            completed = int((now - est) // period)  # 완료한 30일 기간 수
+            if completed < 1:
+                continue  # 아직 첫 정산 전
+            start = est + (completed - 1) * period   # 가장 최근 완료 기간
+            end = est + completed * period
+            secs = vt.voice_seconds_between(guild.id, m.id, start, end)
             if secs < limit:
-                out.append((m, secs))
+                out.append((m, secs, completed))
         out.sort(key=lambda x: x[1])  # 가장 적게 한 사람부터
         return out
 
@@ -104,15 +122,15 @@ class ActivityWatch(commands.Cog):
     @staticmethod
     def _activity_embed(rows) -> discord.Embed:
         if rows:
-            lines = [f"• {m.mention} — 최근 {ACTIVITY_PERIOD_DAYS}일 {secs/3600:.1f}시간"
-                     for m, secs in rows]
+            lines = [f"• {m.mention} — {k}번째 정산기간 {secs/3600:.1f}시간"
+                     for m, secs, k in rows]
             desc = "\n".join(lines)
             color = discord.Color.orange()
         else:
             desc = "✅ 현재 활동 미달성 멤버가 없어요."
             color = discord.Color.green()
         e = discord.Embed(title=f"💤 활동 미달성 ({len(rows)}명)", description=desc, color=color)
-        e.set_footer(text=f"최근 {ACTIVITY_PERIOD_DAYS}일 음성 {ACTIVITY_MIN_HOURS}시간 미만 (레벨10 정착 멤버 대상)")
+        e.set_footer(text=f"정착일부터 {ACTIVITY_PERIOD_DAYS}일 단위 정산 · 해당 기간 음성 {ACTIVITY_MIN_HOURS}시간 미만")
         return e
 
     async def _sync_list(self, guild, channel_id, state_key, rows, embed):
@@ -120,7 +138,7 @@ class ActivityWatch(commands.Cog):
         channel = guild.get_channel(channel_id)
         if channel is None:
             return
-        current = sorted(m.id for m, _ in rows)
+        current = sorted(r[0].id for r in rows)
         prev = get_guild_config(guild.id).get(state_key)
         if prev is not None and sorted(prev) == current:
             return  # 변화 없음 → 재발송 안 함

@@ -79,6 +79,15 @@ def db():
                PRIMARY KEY (guild_id, user_id, fish_key, shiny)
            )"""
     )
+    conn.execute(
+        # 활동 정산 기준일: 멤버가 레벨10(정착)에 도달한 시각. 30일 주기의 앵커.
+        """CREATE TABLE IF NOT EXISTS member_established (
+               guild_id INTEGER NOT NULL,
+               user_id INTEGER NOT NULL,
+               established_at REAL NOT NULL,
+               PRIMARY KEY (guild_id, user_id)
+           )"""
+    )
     # 기존 DB 마이그레이션: 없으면 컬럼 추가 (이미 있으면 무시)
     for col, decl in (("channel_id", "INTEGER"), ("started_at", "REAL")):
         try:
@@ -150,6 +159,40 @@ def voice_seconds_days(guild_id: int, user_id: int, days: float) -> int:
     ).fetchone()
     conn.close()
     return int(row[0])
+
+
+def voice_seconds_between(guild_id: int, user_id: int, start_ts: float, end_ts: float) -> int:
+    """[start_ts, end_ts) 구간의 음성 시간(초). 고정 30일 정산에 사용."""
+    conn = db()
+    row = conn.execute(
+        "SELECT COALESCE(SUM(seconds), 0) FROM voice_sessions "
+        "WHERE guild_id=? AND user_id=? AND ended_at>=? AND ended_at<?",
+        (guild_id, user_id, start_ts, end_ts),
+    ).fetchone()
+    conn.close()
+    return int(row[0])
+
+
+def get_established_at(guild_id: int, user_id: int):
+    """정착(레벨10 도달) 기준일 timestamp. 없으면 None."""
+    conn = db()
+    row = conn.execute(
+        "SELECT established_at FROM member_established WHERE guild_id=? AND user_id=?",
+        (guild_id, user_id),
+    ).fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+def set_established_at(guild_id: int, user_id: int, ts: float):
+    """기준일 기록 (이미 있으면 유지 — 최초 도달 시각을 보존)."""
+    conn = db()
+    conn.execute(
+        "INSERT OR IGNORE INTO member_established (guild_id, user_id, established_at) VALUES (?,?,?)",
+        (guild_id, user_id, ts),
+    )
+    conn.commit()
+    conn.close()
 
 
 # ---- 메시지 ----
