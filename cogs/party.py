@@ -9,7 +9,8 @@
   4) [참여] → 본인 이름·아바타로 참여 메시지 게시 / [취소] → 그 메시지 삭제
      [쫑] → 참여한 사람만, 본인 이름으로 '쫑' 메시지 게시. 다시 누르면 토글로 삭제.
 
-'@역할로 시작' 판별: 역할 멘션은 원문에서 '<@&역할ID>' 형태 → content 가 '<@&' 로 시작하는지 확인.
+모집글 판별: 글이 '역할을 멘션했는지'(message.role_mentions)로만 본다.
+이 정보는 게이트웨이 페이로드에서 오므로 message_content 인텐트(글 내용 읽기) 없이도 동작.
 버튼은 영구(persistent) View 라 재시작 후에도 작동합니다(단, 참여/쫑 추적은 메모리라 초기화됨).
 """
 
@@ -169,8 +170,10 @@ class Party(commands.Cog):
         # 지정된 구인구직 채널의 글이 아니면 무시
         if not recruit_id or message.channel.id != recruit_id:
             return
-        # '@역할' 멘션으로 시작하는 글만 모집글로 인정
-        if not (message.content.strip().startswith("<@&") and message.role_mentions):
+        # 역할을 멘션한 글만 모집글로 인정.
+        # role_mentions 는 게이트웨이 페이로드(mention_roles)에서 오므로
+        # message_content 인텐트 없이도 채워진다 → 글 내용을 읽지 않아도 된다.
+        if not message.role_mentions:
             return
 
         role = message.role_mentions[0]

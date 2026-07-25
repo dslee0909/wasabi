@@ -22,11 +22,12 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 # 봇이 사용할 권한(Intents) 설정
 # - members: 멤버 입장/퇴장 감지 (환영 메시지, 역할)
 # - voice_states: 음성채널 입퇴장 감지 (임시 음성채널, 활동시간)
-# - message_content: 메시지 내용 읽기 (파티 모집 양식 감지)
+# message_content(글 내용 읽기)는 쓰지 않는다 — 파티 감지는 역할 멘션(role_mentions)
+# 으로만 하고, 메시지 카운트는 on_message 이벤트만 있으면 되므로 내용이 필요 없다.
+# 이 특권 인텐트를 안 켜두면 100+ 서버 인증(정식 출시) 심사가 훨씬 수월하다.
 intents = discord.Intents.default()
 intents.members = True
 intents.voice_states = True
-intents.message_content = True
 
 
 class MyBot(commands.Bot):
