@@ -306,6 +306,96 @@ class Economy(commands.Cog):
         default_permissions=discord.Permissions(manage_guild=True),
     )
 
+    낚시터 = app_commands.Group(
+        name="낚시터",
+        description="낚시 가능 채널 지정 (관리자)",
+        default_permissions=discord.Permissions(manage_guild=True),
+    )
+
+    대장간 = app_commands.Group(
+        name="대장간",
+        description="강화 가능 채널 지정 (관리자)",
+        default_permissions=discord.Permissions(manage_guild=True),
+    )
+
+    # ---- 장소 제한 (낚시터/대장간) ----
+    @staticmethod
+    def _place_error(cfg_key: str, label: str, interaction: discord.Interaction):
+        """지정 채널이 있으면 그 채널에서만 허용. 하나도 없으면 어디서나 허용(하위호환).
+        허용이면 None, 아니면 안내 문구를 반환."""
+        channels = get_guild_config(interaction.guild.id).get(cfg_key, [])
+        if not channels or interaction.channel_id in channels:
+            return None
+        spots = " ".join(f"<#{c}>" for c in channels)
+        return f"여기선 할 수 없어요. **{label}** 에서만 가능해요:\n{spots}"
+
+    async def _spot_add(self, interaction, cfg_key, label, channel):
+        ch = channel or interaction.channel
+        gid = interaction.guild.id
+        spots = list(get_guild_config(gid).get(cfg_key, []))
+        if ch.id in spots:
+            await interaction.response.send_message(f"{ch.mention} 은(는) 이미 {label} 이에요.", ephemeral=True)
+            return
+        spots.append(ch.id)
+        update_guild_config(gid, {cfg_key: spots})
+        await interaction.response.send_message(f"✅ {ch.mention} 을(를) **{label}** 로 지정했어요.", ephemeral=True)
+
+    async def _spot_remove(self, interaction, cfg_key, label, channel):
+        ch = channel or interaction.channel
+        gid = interaction.guild.id
+        spots = [c for c in get_guild_config(gid).get(cfg_key, []) if c != ch.id]
+        update_guild_config(gid, {cfg_key: spots})
+        tail = " (이제 어디서나 가능해요)" if not spots else ""
+        await interaction.response.send_message(f"✅ {ch.mention} 을(를) {label} 에서 해제했어요.{tail}", ephemeral=True)
+
+    async def _spot_list(self, interaction, cfg_key, label):
+        guild = interaction.guild
+        spots = get_guild_config(guild.id).get(cfg_key, [])
+        if not spots:
+            body = f"지정된 {label} 이 없어요. **어디서나** 가능한 상태예요."
+        else:
+            lines = []
+            for cid in spots:
+                ch = guild.get_channel(cid)
+                lines.append(ch.mention if ch else f"⚠️ 삭제된 채널 (`{cid}`)")
+            body = "\n".join(lines)
+        embed = discord.Embed(title=f"📍 {label} 목록", description=body, color=discord.Color.teal())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @낚시터.command(name="지정", description="이 채널(또는 지정 채널)을 낚시터로 지정합니다")
+    @app_commands.describe(채널="낚시터로 지정할 채널 (비우면 현재 채널)")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def add_fishing_spot(self, interaction: discord.Interaction, 채널: discord.TextChannel = None):
+        await self._spot_add(interaction, "fishing_channels", "낚시터", 채널)
+
+    @낚시터.command(name="해제", description="낚시터 지정을 해제합니다")
+    @app_commands.describe(채널="해제할 채널 (비우면 현재 채널)")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def remove_fishing_spot(self, interaction: discord.Interaction, 채널: discord.TextChannel = None):
+        await self._spot_remove(interaction, "fishing_channels", "낚시터", 채널)
+
+    @낚시터.command(name="목록", description="지정된 낚시터 채널을 봅니다")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def list_fishing_spots(self, interaction: discord.Interaction):
+        await self._spot_list(interaction, "fishing_channels", "낚시터")
+
+    @대장간.command(name="지정", description="이 채널(또는 지정 채널)을 대장간으로 지정합니다")
+    @app_commands.describe(채널="대장간으로 지정할 채널 (비우면 현재 채널)")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def add_forge(self, interaction: discord.Interaction, 채널: discord.TextChannel = None):
+        await self._spot_add(interaction, "forge_channels", "대장간", 채널)
+
+    @대장간.command(name="해제", description="대장간 지정을 해제합니다")
+    @app_commands.describe(채널="해제할 채널 (비우면 현재 채널)")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def remove_forge(self, interaction: discord.Interaction, 채널: discord.TextChannel = None):
+        await self._spot_remove(interaction, "forge_channels", "대장간", 채널)
+
+    @대장간.command(name="목록", description="지정된 대장간 채널을 봅니다")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def list_forges(self, interaction: discord.Interaction):
+        await self._spot_list(interaction, "forge_channels", "대장간")
+
     @낚시관리.command(name="낚싯대", description="멤버의 낚싯대 티어를 설정합니다")
     @app_commands.describe(멤버="대상", 티어="0=기본, 1~6")
     @app_commands.choices(티어=[
@@ -656,6 +746,11 @@ class Economy(commands.Cog):
 
     @app_commands.command(name="강화", description="대장간에서 장착 낚싯대를 강화합니다 (버튼으로 두드리기)")
     async def enhance(self, interaction: discord.Interaction):
+        # 대장간이 지정돼 있으면 그 채널에서만 강화 가능
+        place = self._place_error("forge_channels", "대장간", interaction)
+        if place:
+            await interaction.response.send_message(place, ephemeral=True)
+            return
         gid, uid = interaction.guild.id, interaction.user.id
         if vt.get_rod(gid, uid) == 0:
             await interaction.response.send_message("먼저 `/상점` 에서 낚싯대를 사세요! (기본 낚싯대는 강화 불가)", ephemeral=True)
@@ -671,6 +766,11 @@ class Economy(commands.Cog):
         )
 
     async def _do_forge(self, interaction: discord.Interaction):
+        # 오래된 패널을 대장간 밖에서 눌러 우회하는 것도 막는다
+        place = self._place_error("forge_channels", "대장간", interaction)
+        if place:
+            await interaction.response.send_message(place, ephemeral=True)
+            return
         gid, uid = interaction.guild.id, interaction.user.id
         tier = vt.get_rod(gid, uid)
         r = RODS[tier]
@@ -734,6 +834,11 @@ class Economy(commands.Cog):
 
     # ---- 낚시터 🎣 (/낚시 = /ㄴㅅ, 쿨다운 공유) ----
     async def _do_fish(self, interaction: discord.Interaction, from_button=False):
+        # 낚시터가 지정돼 있으면 그 채널에서만 낚시 가능
+        place = self._place_error("fishing_channels", "낚시터", interaction)
+        if place:
+            await interaction.response.send_message(place, ephemeral=True)
+            return
         user = interaction.user
         gid = interaction.guild.id
         key = (gid, user.id)

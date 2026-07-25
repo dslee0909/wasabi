@@ -108,6 +108,15 @@ class ServerConfig(commands.Cog):
         embed.add_field(name="🏦 은행 이자 · 📊 활동기간",
                         value=f"이자 {interest}\n활동 판정 {window_txt}", inline=True)
 
+        # ── 낚시 장소 제한 (없으면 어디서나 가능) ──
+        fishing = cfg.get("fishing_channels", [])
+        forge = cfg.get("forge_channels", [])
+        embed.add_field(name="🎣 낚시터",
+                        value=mark(self._channel_list(guild, fishing)) if fishing else "어디서나", inline=True)
+        embed.add_field(name="🔨 대장간",
+                        value=mark(self._channel_list(guild, forge)) if forge else "어디서나", inline=True)
+        embed.add_field(name="​", value="​", inline=True)  # 3열 정렬용 빈칸
+
         if stale["n"]:
             embed.set_footer(
                 text=f"⚠️ 삭제된 채널·역할 {stale['n']}개 — 해당 설정을 다시 지정하면 정리돼요."
