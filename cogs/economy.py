@@ -84,7 +84,8 @@ RODS = {
 }
 ROD_TIERS = (1, 2, 3, 4, 5, 6, 7)  # 상점에 나오는 낚싯대 티어
 
-ENHANCE_BONUS = 0.015  # 강화 +1당 코인 +1.5% (미미)
+ENHANCE_BONUS = 0.015   # 강화 +1당 코인 획득 +1.5%
+ENHANCE_SHINY = 0.003   # 강화 +1당 반짝이 확률 +0.3%p (반짝이는 10배라 실효 상승은 더 큼)
 
 # 낚시 쿨타임(초). 모든 낚싯대 공통 고정값.
 # (RODS 의 'cd' 필드는 현재 쿨타임에 쓰지 않는다 — 낚싯대별 속도 차이는
@@ -93,8 +94,11 @@ FISH_COOLDOWN = 5.0
 
 
 def enhance_cost(level: int) -> int:
-    """강화도(level)에서 +1 하는 비용. 낚싯대 티어와 무관하게 고정 (강화도는 승계되므로 일관성 유지)."""
-    return 20_000 * (level + 1)
+    """강화도(level)에서 +1 하는 비용. 낚싯대 티어와 무관 (강화도는 승계되므로 일관성 유지).
+
+    완만한 지수 곡선(20,000 × 1.30^level): 초반은 저렴하고 후반이 진짜 그라인드가 된다.
+    실패해도 비용을 먹으므로 실제 기대비용은 성공률(enhance_rate)만큼 더 든다."""
+    return int(20_000 * (1.30 ** level))
 
 
 def enhance_rate(level: int) -> float:
@@ -511,7 +515,7 @@ class Economy(commands.Cog):
                 "name": RODS[t]["name"], "img": RODS[t]["img"],
                 "price_str": ("입고중" if not isinstance(RODS[t]["price"], int)
                               else f"{RODS[t]['price']:,} 코인"),
-                "effect": f"x{RODS[t]['mult']} · 반짝이 {int(RODS[t]['shiny']*100)}% · 쿨 {RODS[t]['cd']}s",
+                "effect": f"코인 x{RODS[t]['mult']} · 반짝이 {int(RODS[t]['shiny']*100)}%",
                 "owned": my >= t,
             } for t in ROD_TIERS]
             title = f"낚싯대 상점   (장착: {cur['name']})"
@@ -530,7 +534,7 @@ class Economy(commands.Cog):
             status = "✅ 보유중" if my >= tier else _price_label(tier)
             lines.append(
                 f"{r['emoji']} **{r['name']}** — {status}\n"
-                f"┗ 코인 **x{r['mult']}** · 반짝이 **{int(r['shiny']*100)}%** · 쿨 **{r['cd']}초**"
+                f"┗ 코인 **x{r['mult']}** · 반짝이 **{int(r['shiny']*100)}%**"
             )
         embed = discord.Embed(title="🏪 낚싯대 상점", description="\n\n".join(lines), color=discord.Color.dark_teal())
         embed.set_footer(text=f"현재 장착: {cur['emoji']} {cur['name']}  ·  /구매 로 구입")
@@ -565,7 +569,7 @@ class Economy(commands.Cog):
         vt.add_balance(gid, uid, -r["price"])
         vt.set_rod(gid, uid, tier)
         text = (f"🎉 **{r['emoji']} {r['name']}** 구매 & 장착 완료!\n"
-                f"코인 x{r['mult']} · 반짝이 {int(r['shiny']*100)}% · 쿨 {r['cd']}초")
+                f"코인 x{r['mult']} · 반짝이 {int(r['shiny']*100)}%")
         rod_path = os.path.join(ROD_DIR, r["img"])
         if os.path.exists(rod_path):
             await interaction.response.send_message(text, file=discord.File(rod_path, "rod.png"))
@@ -583,6 +587,7 @@ class Economy(commands.Cog):
         r = RODS[tier]
         bonus = enh * ENHANCE_BONUS
         eff_mult = r["mult"] * (1 + bonus)
+        eff_shiny = r["shiny"] + ENHANCE_SHINY * enh
 
         total, shiny_cnt, species = vt.get_fishing_stats(gid, member.id)
         rank, _ = vt.fishing_rank(gid, member.id)
@@ -594,8 +599,8 @@ class Economy(commands.Cog):
         sections = [
             ("낚싯대 효과", (90, 205, 120), [
                 ("💰", f"코인 배수  x{eff_mult:.2f}" + (f"  (+강화 {int(bonus*100)}%)" if enh else "")),
-                ("✨", f"반짝이 확률  {int(r['shiny']*100)}%"),
-                ("⏱️", f"쿨다운  {r['cd']}초"),
+                ("✨", f"반짝이 확률  {eff_shiny*100:.1f}%" + (f"  (+강화 {ENHANCE_SHINY*enh*100:.1f}%p)" if enh else "")),
+                ("⏱️", f"쿨다운  {FISH_COOLDOWN:g}초"),
                 ("🔨", f"강화  +{enh} / 최대 +{r['cap']}"),
             ]),
             ("낚시 기록", (85, 160, 235), [
@@ -629,7 +634,7 @@ class Economy(commands.Cog):
         name = r["name"] + (f" +{enh}" if enh else "")
         effects = [
             ("💰", f"코인 배수  x{r['mult'] * (1 + bonus):.2f}"),
-            ("✨", f"반짝이 확률  {int(r['shiny']*100)}%"),
+            ("✨", f"반짝이 확률  {(r['shiny'] + ENHANCE_SHINY * enh) * 100:.1f}%"),
             ("🔨", f"강화  +{enh} / 최대 +{r['cap']}"),
         ]
         buf = rodcard.render_status(os.path.join(ROD_DIR, r["img"]), name, enh, effects, bg_path=bg_path)
@@ -742,8 +747,9 @@ class Economy(commands.Cog):
 
         name, emoji, value, _, img = random.choices(FISH, weights=[f[3] for f in FISH])[0]
 
-        # 꽝이 아니면 (낚싯대별) 확률로 '반짝이는' 버전 (가격 10배, 전용 이미지)
-        shiny = value > 0 and random.random() < rod["shiny"]
+        # 꽝이 아니면 (낚싯대 + 강화) 확률로 '반짝이는' 버전 (가격 10배, 전용 이미지)
+        shiny_p = rod["shiny"] + ENHANCE_SHINY * enh
+        shiny = value > 0 and random.random() < shiny_p
         if shiny:
             value *= SHINY_MULT
             shiny_path = os.path.join(SHINY_DIR, img)
