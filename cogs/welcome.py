@@ -10,7 +10,6 @@
 """
 
 import discord
-from discord import app_commands
 from discord.ext import commands
 
 
@@ -18,14 +17,8 @@ class Welcome(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    환영 = app_commands.Group(
-        name="환영",
-        description="환영 메시지 설정 (관리자)",
-        default_permissions=discord.Permissions(manage_guild=True),
-    )
-
     def build_welcome_embed(self, member: discord.Member) -> discord.Embed:
-        """환영 임베드를 만든다 (실제 입장/미리보기에서 공통 사용)."""
+        """환영 임베드를 만든다 (멤버 입장 시 사용)."""
         embed = discord.Embed(
             title="🎉 환영합니다!",
             description=f"{member.mention} 님, **{member.guild.name}** 서버에 오신 걸 환영해요!",
@@ -63,12 +56,6 @@ class Welcome(commands.Cog):
         if channel is None:
             return
         await channel.send(f"👋 **{member.display_name}** 님이 서버를 떠났습니다.")
-
-    @환영.command(name="미리보기", description="환영 메시지가 어떻게 보이는지 미리 확인합니다")
-    async def preview(self, interaction: discord.Interaction):
-        # 명령어를 쓴 사람을 대상으로 환영 임베드를 보여준다 (나만 보임)
-        embed = self.build_welcome_embed(interaction.user)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 # 봇이 이 파일을 불러올 때 호출하는 필수 함수

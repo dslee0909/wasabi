@@ -66,10 +66,29 @@ async def on_ready():
 
 
 # ---- 슬래시 명령어 ----
-@bot.tree.command(name="ping", description="봇이 살아있는지 확인합니다")
+# 봇 상태 점검용(개발/관리자). default_permissions 로 일반 유저 목록에서 숨기고,
+# has_permissions 로 실제 실행도 막는다 (기본권한만으론 서버에서 덮어쓸 수 있으므로 둘 다).
+@bot.tree.command(name="ping", description="봇 지연시간을 확인합니다 (관리자)")
+@app_commands.default_permissions(manage_guild=True)
+@app_commands.checks.has_permissions(manage_guild=True)
 async def ping(interaction: discord.Interaction):
     latency_ms = round(bot.latency * 1000)
-    await interaction.response.send_message(f"pong! (지연시간: {latency_ms}ms)")
+    await interaction.response.send_message(f"pong! (지연시간: {latency_ms}ms)", ephemeral=True)
+
+
+# cog 밖 명령어(/ping)의 권한 실패 등을 깔끔하게 안내한다.
+# cog 명령어는 각자의 cog_app_command_error 가 먼저 처리하므로 여기 오지 않는다.
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.MissingPermissions):
+        msg = "서버 관리 권한이 필요한 명령어예요."
+    else:
+        msg = "명령을 처리하는 중 문제가 생겼어요."
+        print(f"[명령 오류] {interaction.command} : {error!r}")
+    if interaction.response.is_done():
+        await interaction.followup.send(msg, ephemeral=True)
+    else:
+        await interaction.response.send_message(msg, ephemeral=True)
 
 
 def main():

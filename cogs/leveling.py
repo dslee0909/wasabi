@@ -151,7 +151,7 @@ class Leveling(commands.Cog):
             embed.set_footer(text="현재 [관전] 상태 — 음성 시간이 집계되지 않아요")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @app_commands.command(name="순위", description="전체 누적 음성 시간(레벨) 순위 TOP 10")
+    @app_commands.command(name="레벨순위", description="전체 누적 음성 시간(레벨) 순위 TOP 10")
     async def leaderboard(self, interaction: discord.Interaction):
         conn = vt.db()
         rows = conn.execute(
