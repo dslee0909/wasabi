@@ -69,7 +69,9 @@ FORGE_FAIL_BG = os.path.join(ASSETS_DIR, "forge_fail.png")        # 강화 실�
 FORGE_IDLE_BG = os.path.join(ASSETS_DIR, "forge_idle.png")        # 강화 대기화면 배경 (선택)
 STATUS_BG = os.path.join(ASSETS_DIR, "status_bg.png")            # 낚시 스탯창 배경 (선택)
 
-# 낚싯대 상점 (tier: 이름, 이모지, 가격, 코인배수, 반짝이확률, 쿨다운, 이미지파일)
+# 낚싯대 상점 (tier: 이름, 이모지, 가격, 코인배수, 반짝이확률, cd, cap, 이미지파일)
+#   cd: 원래 낚싯대별 쿨타임이었으나 현재 쿨타임은 FISH_COOLDOWN 으로 고정. 필드는 보존.
+#   cap: 강화 상한
 RODS = {
     0: {"name": "기본 낚싯대", "emoji": "🎣", "price": 0,         "mult": 1.0, "shiny": 0.08, "cd": 2.0, "cap": 0,  "img": "rod_0_basic.png"},
     1: {"name": "나무 낚싯대", "emoji": "🪵", "price": 50_000,    "mult": 1.2, "shiny": 0.10, "cd": 2.0, "cap": 2,  "img": "rod_1_wood.png"},
@@ -83,6 +85,11 @@ RODS = {
 ROD_TIERS = (1, 2, 3, 4, 5, 6, 7)  # 상점에 나오는 낚싯대 티어
 
 ENHANCE_BONUS = 0.015  # 강화 +1당 코인 +1.5% (미미)
+
+# 낚시 쿨타임(초). 모든 낚싯대 공통 고정값.
+# (RODS 의 'cd' 필드는 현재 쿨타임에 쓰지 않는다 — 낚싯대별 속도 차이는
+#  강화 시스템 개편 때 다시 다룰 예정이라 데이터만 남겨둔다.)
+FISH_COOLDOWN = 5.0
 
 
 def enhance_cost(level: int) -> int:
@@ -727,7 +734,7 @@ class Economy(commands.Cog):
         key = (gid, user.id)
         rod = RODS[vt.get_rod(gid, user.id)]  # 장착 낚싯대 효과
         enh = vt.get_rod_enhance(gid, user.id)  # 강화 레벨
-        left = self._cooldown_left(self._fish_cd, key, rod["cd"])
+        left = self._cooldown_left(self._fish_cd, key, FISH_COOLDOWN)
         if left:
             await interaction.response.send_message(f"⏳ {left:.1f}초 후에 다시 낚시할 수 있어요.", ephemeral=True)
             return
