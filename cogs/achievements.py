@@ -1,8 +1,9 @@
 """
 업적 / 도전과제 (cogs/achievements.py)
 
-레벨과 다른 축의 성취감 — 숨은 뱃지를 모으는 재미.
-저장하는 데이터(음성시간·메시지·레벨·접속시간대·듀오)로 달성 여부를 판정.
+레벨과 다른 축의 성취감 — 뱃지를 모으는 재미.
+저장하는 데이터(음성·메시지·레벨·접속시간대·듀오·낚시·코인)로 달성 여부를 판정.
+일부는 히든 업적이라 달성 전엔 '???' 로 가려진다.
 
 명령어:
   /업적 [멤버]        달성/미달성 업적 보기 (유저용, 볼 때 새로 달성한 건 자동 획득+축하)
@@ -20,21 +21,51 @@ from discord.ext import commands, tasks
 import voicetime as vt
 from store import get_guild_config, update_guild_config
 
-# (key, 이모지, 이름, 설명, 조건함수)  — 조건함수는 stats dict 를 받아 bool 반환
+# (key, 이모지, 이름, 설명, 조건함수, 히든여부)
+#   조건함수는 stats dict 를 받아 bool 반환.
+#   히든이면 미달성 시 /업적 에서 '???' 로 가려져 발견하는 재미를 준다.
 ACHIEVEMENTS = [
-    ("first_voice", "🌱", "첫 발걸음", "음성채널에 처음 접속", lambda s: s["voice"] > 0),
-    ("voice_10h", "🔊", "음성 10시간", "누적 음성 10시간 달성", lambda s: s["voice"] >= 10 * 3600),
-    ("voice_100h", "🦉", "음성 100시간", "누적 음성 100시간 달성", lambda s: s["voice"] >= 100 * 3600),
-    ("night_owl", "🌙", "올빼미", "새벽(0~4시)에 음성 접속", lambda s: bool(s["hours"] & {0, 1, 2, 3, 4})),
-    ("early_bird", "🐦", "일찍 일어난 새", "아침(5~8시)에 음성 접속", lambda s: bool(s["hours"] & {5, 6, 7, 8})),
-    ("msg_100", "💬", "수다쟁이", "메시지 100개 작성", lambda s: s["msgs"] >= 100),
-    ("msg_1000", "📢", "인싸", "메시지 1000개 작성", lambda s: s["msgs"] >= 1000),
-    ("level_10", "⭐", "레벨 10", "레벨 10 도달", lambda s: s["level"] >= 10),
-    ("level_20", "👑", "레벨 20", "레벨 20 도달", lambda s: s["level"] >= 20),
-    ("duo_10h", "💞", "단짝", "누군가와 10시간 이상 함께 음성", lambda s: s["duo"] >= 10 * 3600),
+    # ── 음성 ──
+    ("first_voice", "🌱", "첫 발걸음", "음성채널에 처음 접속", lambda s: s["voice"] > 0, False),
+    ("voice_10h", "🔊", "음성 10시간", "누적 음성 10시간 달성", lambda s: s["voice"] >= 10 * 3600, False),
+    ("voice_100h", "🦉", "음성 100시간", "누적 음성 100시간 달성", lambda s: s["voice"] >= 100 * 3600, False),
+    ("voice_500h", "🔥", "음성 500시간", "누적 음성 500시간 달성", lambda s: s["voice"] >= 500 * 3600, False),
+    ("night_owl", "🌙", "올빼미", "새벽(0~4시)에 음성 접속", lambda s: bool(s["hours"] & {0, 1, 2, 3, 4}), False),
+    ("early_bird", "🐦", "일찍 일어난 새", "아침(5~8시)에 음성 접속", lambda s: bool(s["hours"] & {5, 6, 7, 8}), False),
+    # ── 메시지 ──
+    ("msg_100", "💬", "수다쟁이", "메시지 100개 작성", lambda s: s["msgs"] >= 100, False),
+    ("msg_1000", "📢", "인싸", "메시지 1000개 작성", lambda s: s["msgs"] >= 1000, False),
+    # ── 레벨 ──
+    ("level_10", "⭐", "레벨 10", "레벨 10 도달", lambda s: s["level"] >= 10, False),
+    ("level_20", "👑", "레벨 20", "레벨 20 도달", lambda s: s["level"] >= 20, False),
+    # ── 소셜 ──
+    ("duo_10h", "💞", "단짝", "누군가와 10시간 이상 함께 음성", lambda s: s["duo"] >= 10 * 3600, False),
+    ("friends_3", "👥", "인맥왕", "3명과 각각 10시간 이상 함께 음성", lambda s: s["duo3"] >= 3, False),
+    # ── 낚시 ──
+    ("fish_first", "🎣", "첫 손맛", "물고기를 처음 낚음", lambda s: s["fish"] >= 1, False),
+    ("fish_100", "🐟", "낚시꾼", "물고기 100마리 낚음", lambda s: s["fish"] >= 100, False),
+    ("fish_1000", "🎏", "강태공", "물고기 1000마리 낚음", lambda s: s["fish"] >= 1000, False),
+    ("shiny_10", "✨", "반짝이 수집가", "반짝이는 물고기 10마리 낚음", lambda s: s["shiny"] >= 10, False),
+    ("dex_master", "📖", "도감 마스터", "모든 종류의 물고기 낚음", lambda s: s["dex"] >= s["dex_total"], False),
+    ("catch_diamond", "💎", "인생 역전", "다이아몬드를 낚음", lambda s: s["diamond"], True),
+    ("catch_boot", "🥾", "어부의 굴욕", "낡은 신발을 낚음", lambda s: s["boot"], True),
+    # ── 경제 ──
+    ("rich_10k", "🪙", "첫 재산", "코인 10,000 보유", lambda s: s["money"] >= 10_000, False),
+    ("rich_1m", "💰", "백만장자", "코인 1,000,000 보유", lambda s: s["money"] >= 1_000_000, False),
+    ("savings_500k", "🏦", "저축왕", "은행에 500,000 예치", lambda s: s["bank"] >= 500_000, False),
+    # ── 히든: 종합 ──
+    ("allrounder", "🌈", "만능 재주꾼", "낚시·음성·메시지·코인을 모두 경험",
+     lambda s: s["fish"] > 0 and s["voice"] > 0 and s["msgs"] > 0 and s["money"] > 0, True),
 ]
 
 ACH_BY_KEY = {a[0]: a for a in ACHIEVEMENTS}
+
+# 도감 마스터 판정용: 낚여서 기록되는 물고기 종수 (economy.FISH 의 가격>0 종)
+try:
+    from cogs.economy import FISH as _FISH
+    DEX_TOTAL = sum(1 for f in _FISH if f[2] > 0)
+except Exception:
+    DEX_TOTAL = 12  # 폴백 (현재 낚이는 종 수)
 
 
 class Achievements(commands.Cog):
@@ -55,12 +86,25 @@ class Achievements(commands.Cog):
     def _build_stats(self, guild_id: int, user_id: int) -> dict:
         voice = vt.total_seconds(guild_id, user_id)
         duos = vt.best_duos(guild_id, user_id, days=3650, limit=1)
+        fish, shiny, dex = vt.get_fishing_stats(guild_id, user_id)
+        coins = vt.get_balance(guild_id, user_id)
+        bank = vt.get_bank(guild_id, user_id)
         return {
             "voice": voice,
             "level": vt.hours_to_level(voice / 3600, guild_id),
             "msgs": vt.message_count_total(guild_id, user_id),
             "hours": vt.started_hours(guild_id, user_id),
             "duo": duos[0][1] if duos else 0,
+            "duo3": vt.duo_count_over(guild_id, user_id, 10 * 3600),
+            "fish": fish,
+            "shiny": shiny,
+            "dex": dex,
+            "dex_total": DEX_TOTAL,
+            "diamond": vt.has_caught(guild_id, user_id, "다이아몬드"),
+            "boot": vt.has_caught(guild_id, user_id, "낡은 신발"),
+            "coins": coins,
+            "bank": bank,
+            "money": coins + bank,
         }
 
     def _newly_unlock(self, guild_id: int, user_id: int) -> list[str]:
@@ -68,7 +112,7 @@ class Achievements(commands.Cog):
         stats = self._build_stats(guild_id, user_id)
         owned = vt.unlocked_achievements(guild_id, user_id)
         newly = []
-        for key, emoji, name, desc, cond in ACHIEVEMENTS:
+        for key, emoji, name, desc, cond, hidden in ACHIEVEMENTS:
             if key not in owned and cond(stats):
                 vt.unlock_achievement(guild_id, user_id, key)
                 newly.append(key)
@@ -124,17 +168,23 @@ class Achievements(commands.Cog):
         owned = vt.unlocked_achievements(gid, member.id)
 
         lines = []
-        for key, emoji, name, desc, _ in ACHIEVEMENTS:
+        for key, emoji, name, desc, _, hidden in ACHIEVEMENTS:
             if key in owned:
                 lines.append(f"{emoji} **{name}** — {desc} ✅")
+            elif hidden:
+                # 히든 업적: 달성 전엔 정체를 가려 발견하는 재미를 준다
+                lines.append("❓ **???** — 숨겨진 업적")
             else:
                 lines.append(f"🔒 ~~{name}~~ — {desc}")
 
+        hidden_left = sum(1 for k, *_ , h in ACHIEVEMENTS if h and k not in owned)
         embed = discord.Embed(
             title=f"🏅 {member.display_name} 님의 업적 ({len(owned)}/{len(ACHIEVEMENTS)})",
             description="\n".join(lines),
             color=discord.Color.teal(),
         )
+        if hidden_left:
+            embed.set_footer(text=f"❓ 숨겨진 업적 {hidden_left}개가 당신의 발견을 기다려요.")
         if newly:
             embed.add_field(
                 name="🎉 새로 달성!",

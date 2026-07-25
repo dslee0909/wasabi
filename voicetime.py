@@ -291,6 +291,23 @@ def get_fishing_stats(guild_id: int, user_id: int):
     return int(row[0]), int(row[1]), int(row[2])
 
 
+def has_caught(guild_id: int, user_id: int, fish_key: str) -> bool:
+    """특정 물고기를 한 번이라도 낚았는지 (fish_key = 물고기 이름). 업적용."""
+    conn = db()
+    row = conn.execute(
+        "SELECT 1 FROM fish_catches WHERE guild_id=? AND user_id=? AND fish_key=? LIMIT 1",
+        (guild_id, user_id, fish_key),
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
+def duo_count_over(guild_id: int, user_id: int, min_seconds: int, days: int = 3650) -> int:
+    """min_seconds 이상 함께 음성에 있던 서로 다른 상대 수. '인맥왕' 업적용."""
+    return sum(1 for _, secs in best_duos(guild_id, user_id, days=days, limit=50)
+               if secs >= min_seconds)
+
+
 def fishing_rank(guild_id: int, user_id: int):
     """(내 순위, 전체 인원) — 총 마릿수 기준."""
     conn = db()
