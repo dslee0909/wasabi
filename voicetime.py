@@ -548,9 +548,21 @@ def channel_countable(guild_id: int, channel) -> bool:
     return channel.id not in excluded
 
 
+def is_mic_on(member: discord.Member) -> bool:
+    """마이크가 켜져 있는지. 본인이 끄거나(self_mute) 서버가 음소거(mute)하면 꺼짐.
+    음성에 없으면(voice None) 판단 불가 → 집계는 어차피 채널 조건에서 걸러진다."""
+    v = member.voice
+    if v is None:
+        return False
+    return not (v.self_mute or v.mute)
+
+
 def countable(member: discord.Member, channel) -> bool:
-    """이 멤버의 지금 상태를 시간 집계 대상으로 볼지 (제외채널·관전 반영)."""
-    return channel_countable(member.guild.id, channel) and not is_spectating(member)
+    """이 멤버의 지금 상태를 시간 집계 대상으로 볼지 (제외채널·관전·마이크 반영).
+    마이크를 끄고 있으면(잠수) 집계하지 않는다."""
+    return (channel_countable(member.guild.id, channel)
+            and not is_spectating(member)
+            and is_mic_on(member))
 
 
 # ---- 분석: 케미(듀오) / 골든타임 ----

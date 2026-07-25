@@ -5,7 +5,8 @@
   - 음성채널 접속 시간을 추적해 DB(data.db)에 기록 (이 봇의 '음성시간 추적기')
   - '전체 누적시간' 기준 레벨을 보여줌 → 레벨은 영구(절대 안 내려감)
 
-집계 규칙: 음성 시간만 / '[관전] ' 접두사·제외채널은 미집계 (voicetime.countable)
+집계 규칙: 음성 접속 시간만 집계. 아래는 미집계 (voicetime.countable):
+  · 마이크를 끈(음소거) 상태  · '[관전] ' 접두사 닉네임  · 제외 채널  · 봇
 
 명령어:
   /레벨 [멤버]        레벨·누적시간·최근활동 보기
@@ -79,6 +80,8 @@ class Leveling(commands.Cog):
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
+        # 채널 이동뿐 아니라 마이크 음소거 토글도 이 이벤트로 온다.
+        # 매번 _sync 를 다시 돌려서, 마이크를 끄면 세션이 멈추고 켜면 다시 시작된다.
         if member.bot:
             return
         self._sync(member, after.channel)
