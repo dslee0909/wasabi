@@ -48,7 +48,11 @@ ACHIEVEMENTS = [
     ("fish_5000", "🏆", "낚시왕", "물고기 5000마리 낚음", lambda s: s["fish"] >= 5000, False),
     ("fish_10000", "🌊", "바다의 전설", "물고기 10000마리 낚음", lambda s: s["fish"] >= 10000, False),
     ("fish_20000", "🔱", "심해의 지배자", "물고기 20000마리 낚음", lambda s: s["fish"] >= 20000, False),
-    ("shiny_10", "✨", "반짝이 수집가", "반짝이는 물고기 10마리 낚음", lambda s: s["shiny"] >= 10, False),
+    # 반짝이 사다리 — 강화로 반짝이 확률이 올라(최대 26%) 임계값 상향.
+    # 'shiny_10' 키는 기존 획득자 badge 보존을 위해 유지(임계값만 10→50).
+    ("shiny_10", "✨", "반짝이 수집가", "반짝이는 물고기 50마리 낚음", lambda s: s["shiny"] >= 50, False),
+    ("shiny_300", "🌟", "반짝이 사냥꾼", "반짝이는 물고기 300마리 낚음", lambda s: s["shiny"] >= 300, False),
+    ("shiny_1500", "💫", "반짝이 대가", "반짝이는 물고기 1500마리 낚음", lambda s: s["shiny"] >= 1500, False),
     ("dex_master", "📖", "도감 마스터", "모든 종류의 물고기 낚음", lambda s: s["dex"] >= s["dex_total"], False),
     ("catch_diamond", "💎", "인생 역전", "다이아몬드를 낚음", lambda s: s["diamond"], True),
     ("catch_boot", "🥾", "어부의 굴욕", "낡은 신발을 낚음", lambda s: s["boot"], True),
