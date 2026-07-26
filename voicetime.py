@@ -345,6 +345,17 @@ def has_caught(guild_id: int, user_id: int, fish_key: str) -> bool:
     return row is not None
 
 
+def has_caught_shiny(guild_id: int, user_id: int, fish_key: str) -> bool:
+    """특정 물고기를 '반짝이는' 버전으로 낚은 적 있는지. 히든 업적용."""
+    conn = db()
+    row = conn.execute(
+        "SELECT 1 FROM fish_catches WHERE guild_id=? AND user_id=? AND fish_key=? AND shiny=1 LIMIT 1",
+        (guild_id, user_id, fish_key),
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
 def duo_count_over(guild_id: int, user_id: int, min_seconds: int, days: int = 3650) -> int:
     """min_seconds 이상 함께 음성에 있던 서로 다른 상대 수. '인맥왕' 업적용."""
     return sum(1 for _, secs in best_duos(guild_id, user_id, days=days, limit=50)

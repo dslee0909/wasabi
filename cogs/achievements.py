@@ -56,6 +56,13 @@ ACHIEVEMENTS = [
     ("dex_master", "📖", "도감 마스터", "모든 종류의 물고기 낚음", lambda s: s["dex"] >= s["dex_total"], False),
     ("catch_diamond", "💎", "인생 역전", "다이아몬드를 낚음", lambda s: s["diamond"], True),
     ("catch_boot", "🥾", "어부의 굴욕", "낡은 신발을 낚음", lambda s: s["boot"], True),
+    # ── 히든: 희귀 낚시 / 장비 ──
+    ("catch_carp", "🎏", "용왕님 진노", "전설의 황금잉어를 낚음", lambda s: s["carp"], True),
+    ("catch_whale", "🐋", "모비딕", "고래를 낚음", lambda s: s["whale"], True),
+    ("shiny_diamond", "💠", "억겁의 행운", "반짝이는 다이아몬드를 낚음", lambda s: s["shiny_diamond"], True),
+    ("first_shiny", "🌟", "첫 반짝임", "반짝이는 물고기를 처음 낚음", lambda s: s["shiny"] >= 1, True),
+    ("max_enhance", "⚒️", "장인의 경지", "낚싯대를 최대까지 강화함", lambda s: s["max_enhanced"], True),
+    ("rod_wasabi", "🍃", "찐 와사비", "와사비 낚시대를 손에 넣음", lambda s: s["rod_tier"] >= 8, True),
     # ── 경제 ──
     ("rich_10k", "🪙", "첫 재산", "코인 10,000 보유", lambda s: s["money"] >= 10_000, False),
     ("rich_1m", "💰", "백만장자", "코인 1,000,000 보유", lambda s: s["money"] >= 1_000_000, False),
@@ -69,10 +76,11 @@ ACH_BY_KEY = {a[0]: a for a in ACHIEVEMENTS}
 
 # 도감 마스터 판정용: 낚여서 기록되는 물고기 종수 (economy.FISH 의 가격>0 종)
 try:
-    from cogs.economy import FISH as _FISH
+    from cogs.economy import FISH as _FISH, RODS as _RODS
     DEX_TOTAL = sum(1 for f in _FISH if f[2] > 0)
 except Exception:
     DEX_TOTAL = 12  # 폴백 (현재 낚이는 종 수)
+    _RODS = {}
 
 
 class Achievements(commands.Cog):
@@ -96,6 +104,8 @@ class Achievements(commands.Cog):
         fish, shiny, dex = vt.get_fishing_stats(guild_id, user_id)
         coins = vt.get_balance(guild_id, user_id)
         bank = vt.get_bank(guild_id, user_id)
+        rod_tier = vt.get_rod(guild_id, user_id)
+        rod_cap = _RODS.get(rod_tier, {}).get("cap", 999)
         return {
             "voice": voice,
             "level": vt.hours_to_level(voice / 3600, guild_id),
@@ -112,6 +122,12 @@ class Achievements(commands.Cog):
             "coins": coins,
             "bank": bank,
             "money": coins + bank,
+            # 히든 업적용 (희귀 낚시 / 반짝이 다이아 / 장비)
+            "carp": vt.has_caught(guild_id, user_id, "전설의 황금잉어"),
+            "whale": vt.has_caught(guild_id, user_id, "고래"),
+            "shiny_diamond": vt.has_caught_shiny(guild_id, user_id, "다이아몬드"),
+            "rod_tier": rod_tier,
+            "max_enhanced": rod_tier >= 1 and vt.get_rod_enhance(guild_id, user_id) >= rod_cap,
         }
 
     def _newly_unlock(self, guild_id: int, user_id: int) -> list[str]:
