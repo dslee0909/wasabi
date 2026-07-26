@@ -406,10 +406,10 @@ class ConfirmPurchaseView(discord.ui.View):
 
 class UseItemButton(discord.ui.Button):
     """가방의 소모품 사용 버튼."""
-    def __init__(self, key: str, count: int):
+    def __init__(self, key: str, count: int, disabled: bool = False):
         c = CONSUMABLES[key]
         super().__init__(style=discord.ButtonStyle.primary,
-                         label=f"{c['name']} 사용 ({count})", emoji=c["emoji"])
+                         label=f"{c['name']} 사용 ({count})", emoji=c["emoji"], disabled=disabled)
         self.key = key
 
     async def callback(self, interaction: discord.Interaction):
@@ -418,16 +418,18 @@ class UseItemButton(discord.ui.Button):
 
 
 class BagView(discord.ui.View):
-    """가방 (본인 전용, 3분). 보유 소모품별 사용 버튼."""
+    """가방 (본인 전용, 3분). 보유 소모품별 사용 버튼. 미끼는 한 번에 한 종류만."""
     def __init__(self, cog, gid: int, uid: int):
         super().__init__(timeout=180)
         self.cog = cog
         self.gid = gid
         self.uid = uid
         inv = vt.get_inventory(gid, uid)
+        active_key = next(iter(vt.get_active_effects(gid, uid)), None)  # 활성 미끼(있으면 하나)
         for k in CONSUMABLE_ORDER:
             if inv.get(k, 0) > 0:
-                self.add_item(UseItemButton(k, inv[k]))
+                # 다른 미끼가 적용 중이면 그 외 미끼 버튼은 비활성 (한 번에 하나만)
+                self.add_item(UseItemButton(k, inv[k], disabled=active_key is not None and k != active_key))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.uid:
@@ -818,7 +820,8 @@ class Economy(commands.Cog):
                     f"{'보유중' if my >= t else _price_label(t)}" for t in ROD_TIERS)
         elif category == "consumable":
             inv = vt.get_inventory(gid, uid)
-            lines = ["🧪 **소모품 상점** — 미끼는 낚시에 버프를 줘요. 사면 `/가방` 에서 사용하세요."]
+            lines = ["🧪 **소모품 상점** — 미끼는 낚시에 버프를 줘요. 사면 `/가방` 에서 사용.",
+                     "ℹ️ 미끼는 **한 번에 한 종류만** 적용돼요."]
             for k in CONSUMABLE_ORDER:
                 c = CONSUMABLES[k]
                 have = inv.get(k, 0)
@@ -899,6 +902,16 @@ class Economy(commands.Cog):
     async def _use_consumable(self, interaction: discord.Interaction, key: str):
         gid, uid = interaction.guild.id, interaction.user.id
         c = CONSUMABLES[key]
+        # 미끼는 한 번에 한 종류만 — 다른 미끼가 적용 중이면 막는다(같은 미끼 보충은 허용)
+        active = vt.get_active_effects(gid, uid)
+        other = [ak for ak in active if ak != key]
+        if other:
+            ak = other[0]
+            ac = CONSUMABLES.get(ak, {"emoji": "", "name": "미끼"})
+            note = (f"⚠️ 이미 **{ac['emoji']} {ac['name']}**(남은 {active[ak]}회)를 쓰는 중이에요.\n"
+                    f"미끼는 한 번에 한 종류만 — 다 쓴 뒤에 사용하세요.")
+            await self._render_bag(interaction, gid, uid, note=note, edit=True)
+            return
         if vt.use_item(gid, uid, key, c["charges"]):
             note = f"{c['emoji']} **{c['name']}** 사용! 이제부터 {c['desc']} 적용돼요."
         else:
