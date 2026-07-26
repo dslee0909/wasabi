@@ -271,6 +271,101 @@ class ForgeView(discord.ui.View):
         await self.cog._do_forge(interaction)
 
 
+# ---- 상점 카테고리(탭) ----
+# (key, 이모지, 라벨, 사용가능). 준비중 카테고리는 자리만 잡아두고, 나중에 만들면 available=True.
+SHOP_CATEGORIES = [
+    ("rod", "🎣", "낚싯대", True),
+    ("consumable", "🧪", "소모품", False),
+    ("role", "🎭", "전용 역할", False),
+]
+
+
+class CategorySelect(discord.ui.Select):
+    """상점 상단 탭 — 카테고리 전환 셀렉트."""
+    def __init__(self, current: str):
+        options = [
+            discord.SelectOption(label=lbl, value=key, emoji=emo, default=(key == current),
+                                 description=None if avail else "준비중")
+            for key, emo, lbl, avail in SHOP_CATEGORIES
+        ]
+        super().__init__(placeholder="카테고리 선택", options=options, row=0)
+
+    async def callback(self, interaction: discord.Interaction):
+        view: "ShopView" = self.view
+        await view.cog._render_shop(interaction, view.gid, view.uid, self.values[0], edit=True)
+
+
+class RodBuyButton(discord.ui.Button):
+    """낚싯대 구매 버튼 — 보유/구매가능/코인부족/입고중 상태를 색·활성으로 반영."""
+    def __init__(self, tier: int, my: int, wallet: int):
+        r = RODS[tier]
+        owned = my >= tier
+        instock = isinstance(r["price"], int)
+        affordable = instock and wallet >= r["price"]
+        if owned:
+            style, label, disabled = discord.ButtonStyle.success, r["name"], True
+        elif not instock:
+            style, label, disabled = discord.ButtonStyle.secondary, f"{r['name']} (입고중)", True
+        elif affordable:
+            style, label, disabled = discord.ButtonStyle.primary, r["name"], False
+        else:  # 코인 부족 → 비활성
+            style, label, disabled = discord.ButtonStyle.secondary, r["name"], True
+        super().__init__(style=style, label=label, emoji=r["emoji"], disabled=disabled,
+                         row=1 + (tier - 1) // 4)
+        self.tier = tier
+
+    async def callback(self, interaction: discord.Interaction):
+        view: "ShopView" = self.view
+        await view.cog._confirm_purchase(interaction, self.tier)
+
+
+class ShopView(discord.ui.View):
+    """버튼식 상점 (본인 전용, 3분). 카테고리 탭 + 아이템 구매 버튼."""
+    def __init__(self, cog, gid: int, uid: int, category: str = "rod"):
+        super().__init__(timeout=180)
+        self.cog = cog
+        self.gid = gid
+        self.uid = uid
+        self.category = category
+        self.add_item(CategorySelect(category))
+        if category == "rod":
+            my = vt.get_rod(gid, uid)
+            wallet = vt.get_balance(gid, uid)
+            for t in ROD_TIERS:
+                self.add_item(RodBuyButton(t, my, wallet))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.uid:
+            await interaction.response.send_message(
+                "본인 상점에서만 이용할 수 있어요. `/상점` 으로 여세요.", ephemeral=True)
+            return False
+        return True
+
+
+class ConfirmPurchaseView(discord.ui.View):
+    """구매 확인 (모든 구매 전 필수). 본인 전용, 1분."""
+    def __init__(self, cog, gid: int, uid: int, tier: int):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.gid = gid
+        self.uid = uid
+        self.tier = tier
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.uid
+
+    @discord.ui.button(label="구매 확정", emoji="✅", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        ok, msg = self.cog._try_purchase_rod(self.gid, self.uid, self.tier)
+        note = ("🎉 " + msg) if ok else ("⚠️ " + msg)
+        await self.cog._render_shop(interaction, self.gid, self.uid, "rod", note=note, edit=True)
+
+    @discord.ui.button(label="취소", emoji="✖️", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._render_shop(interaction, self.gid, self.uid, "rod",
+                                    note="구매를 취소했어요.", edit=True)
+
+
 class Economy(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -590,45 +685,88 @@ class Economy(commands.Cog):
         embed = discord.Embed(title="💰 코인 부자 순위", description="\n".join(lines), color=discord.Color.gold())
         await interaction.response.send_message(embed=embed)
 
-    # ---- 상점 🏪 ----
-    @app_commands.command(name="상점", description="낚싯대 상점 — 코인으로 낚싯대를 삽니다")
-    async def shop(self, interaction: discord.Interaction):
-        my = vt.get_rod(interaction.guild.id, interaction.user.id)
+    # ---- 상점 🏪 (버튼식 + 탭) ----
+    def _try_purchase_rod(self, gid: int, uid: int, tier: int) -> tuple[bool, str]:
+        """낚싯대 구매 시도 (슬래시·버튼 공용). (성공여부, 메시지). 성공 시 차감+장착."""
+        r = RODS[tier]
+        if not isinstance(r["price"], int):
+            return False, "아직 입고 전인 낚싯대예요. 🚧"
+        my = vt.get_rod(gid, uid)
+        if my >= tier:
+            return False, f"이미 **{RODS[my]['name']}**(이상)을 보유하고 있어요."
+        wallet = vt.get_balance(gid, uid)
+        if wallet < r["price"]:
+            return False, (f"코인이 부족해요. (지갑 {coins(wallet)} / 가격 {coins(r['price'])})\n"
+                           f"은행에 있으면 `/출금` 먼저 하세요.")
+        vt.add_balance(gid, uid, -r["price"])
+        vt.set_rod(gid, uid, tier)
+        return True, (f"**{r['emoji']} {r['name']}** 구매 & 장착 완료!  "
+                      f"(코인 x{r['mult']} · 반짝이 {int(r['shiny']*100)}%)")
+
+    def _rod_shop_file(self, gid: int, uid: int):
+        """낚싯대 상점 이미지(discord.File). 렌더 실패 시 None."""
+        my = vt.get_rod(gid, uid)
         cur = RODS[my]
+        entries = [{
+            "name": RODS[t]["name"], "img": RODS[t]["img"],
+            "price_str": ("입고중" if not isinstance(RODS[t]["price"], int)
+                          else f"{RODS[t]['price']:,} 코인"),
+            "effect": f"코인 x{RODS[t]['mult']} · 반짝이 {int(RODS[t]['shiny']*100)}%",
+            "owned": my >= t,
+        } for t in ROD_TIERS]
+        try:
+            buf = rodcard.render_shop(entries, f"낚싯대 상점   (장착: {cur['name']})", ROD_DIR)
+            return discord.File(buf, "shop.png")
+        except Exception as e:
+            print(f"[경고] 상점 이미지 생성 실패: {e}")
+            return None
 
-        # 아트가 하나라도 있으면 이미지 상점 (아트 없는 신규 티어는 render_shop 이 빈 썸네일로 처리).
-        # 아트가 전혀 없으면(초기 상태) 텍스트 상점으로 폴백.
-        img_shop = any(os.path.exists(os.path.join(ROD_DIR, RODS[t]["img"])) for t in BUYABLE_TIERS)
-        if img_shop:
-            # 이미지 안에는 이모지가 두부(□)로 나오므로 이모지 없는 라벨 사용
-            entries = [{
-                "name": RODS[t]["name"], "img": RODS[t]["img"],
-                "price_str": ("입고중" if not isinstance(RODS[t]["price"], int)
-                              else f"{RODS[t]['price']:,} 코인"),
-                "effect": f"코인 x{RODS[t]['mult']} · 반짝이 {int(RODS[t]['shiny']*100)}%",
-                "owned": my >= t,
-            } for t in ROD_TIERS]
-            title = f"낚싯대 상점   (장착: {cur['name']})"
-            try:
-                buf = rodcard.render_shop(entries, title, ROD_DIR)
-                await interaction.response.send_message(
-                    content="`/구매` 로 구입하세요.", file=discord.File(buf, "shop.png"), ephemeral=True
-                )
-                return
-            except Exception as e:
-                print(f"[경고] 상점 이미지 생성 실패, 텍스트로 대체: {e}")
+    async def _render_shop(self, interaction: discord.Interaction, gid: int, uid: int,
+                           category: str, note: str = "", edit: bool = False):
+        """상점 화면을 그린다(카테고리별). edit=True면 기존 메시지 갱신."""
+        view = ShopView(self, gid, uid, category)
+        file = None
+        if category == "rod":
+            file = self._rod_shop_file(gid, uid)
+            content = "사고 싶은 낚싯대의 버튼을 누르세요. (구매 전 확인 창이 떠요)"
+            if file is None:  # 이미지 실패 시 텍스트 폴백
+                my = vt.get_rod(gid, uid)
+                content += "\n" + "\n".join(
+                    f"{RODS[t]['emoji']} {RODS[t]['name']} — "
+                    f"{'보유중' if my >= t else _price_label(t)}" for t in ROD_TIERS)
+        else:
+            cat = next(c for c in SHOP_CATEGORIES if c[0] == category)
+            content = f"🚧 **{cat[2]}** 은(는) 준비 중이에요. 곧 만나요!"
+        if note:
+            content = f"{note}\n\n{content}"
+        if edit:
+            await interaction.response.edit_message(
+                content=content, attachments=([file] if file else []), view=view)
+        elif file:
+            await interaction.response.send_message(content=content, file=file, view=view, ephemeral=True)
+        else:
+            await interaction.response.send_message(content=content, view=view, ephemeral=True)
 
-        lines = []
-        for tier in ROD_TIERS:
-            r = RODS[tier]
-            status = "✅ 보유중" if my >= tier else _price_label(tier)
-            lines.append(
-                f"{r['emoji']} **{r['name']}** — {status}\n"
-                f"┗ 코인 **x{r['mult']}** · 반짝이 **{int(r['shiny']*100)}%**"
-            )
-        embed = discord.Embed(title="🏪 낚싯대 상점", description="\n\n".join(lines), color=discord.Color.dark_teal())
-        embed.set_footer(text=f"현재 장착: {cur['emoji']} {cur['name']}  ·  /구매 로 구입")
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+    async def _confirm_purchase(self, interaction: discord.Interaction, tier: int):
+        """구매 버튼 클릭 → 확인 창(구매 확정/취소)으로 전환."""
+        gid, uid = interaction.guild.id, interaction.user.id
+        r = RODS[tier]
+        wallet = vt.get_balance(gid, uid)
+        instock = isinstance(r["price"], int)
+        after = wallet - r["price"] if instock else wallet
+        content = (
+            f"🛒 **구매 확인**\n"
+            f"{r['emoji']} **{r['name']}**  —  {coins(r['price']) if instock else '입고중'}\n"
+            f"효과: 코인 x{r['mult']} · 반짝이 {int(r['shiny']*100)}%\n"
+            f"지갑: {coins(wallet)} → {coins(after)}\n\n"
+            f"구매하시겠어요?"
+        )
+        await interaction.response.edit_message(
+            content=content, attachments=[], view=ConfirmPurchaseView(self, gid, uid, tier))
+
+    @app_commands.command(name="상점", description="상점 — 낚싯대·아이템을 버튼으로 구매합니다")
+    async def shop(self, interaction: discord.Interaction):
+        await self._render_shop(interaction, interaction.guild.id, interaction.user.id, "rod")
 
     @app_commands.command(name="구매", description="낚싯대를 구매합니다 (지갑 코인 사용)")
     @app_commands.describe(낚싯대="구매할 낚싯대")
@@ -639,32 +777,15 @@ class Economy(commands.Cog):
     async def buy(self, interaction: discord.Interaction, 낚싯대: app_commands.Choice[int]):
         gid, uid = interaction.guild.id, interaction.user.id
         tier = 낚싯대.value
-        r = RODS[tier]
-        if not isinstance(r["price"], int):
-            await interaction.response.send_message("아직 입고 전인 낚싯대예요. 조금만 기다려주세요! 🚧", ephemeral=True)
+        ok, msg = self._try_purchase_rod(gid, uid, tier)
+        if not ok:
+            await interaction.response.send_message(msg, ephemeral=True)
             return
-        my = vt.get_rod(gid, uid)
-        if my >= tier:
-            await interaction.response.send_message(
-                f"이미 **{RODS[my]['name']}**(이상)을 보유하고 있어요.", ephemeral=True
-            )
-            return
-        wallet = vt.get_balance(gid, uid)
-        if wallet < r["price"]:
-            await interaction.response.send_message(
-                f"코인이 부족해요. (지갑 {coins(wallet)} / 가격 {coins(r['price'])})\n"
-                f"은행에 있으면 `/출금` 먼저 하세요.", ephemeral=True
-            )
-            return
-        vt.add_balance(gid, uid, -r["price"])
-        vt.set_rod(gid, uid, tier)
-        text = (f"🎉 **{r['emoji']} {r['name']}** 구매 & 장착 완료!\n"
-                f"코인 x{r['mult']} · 반짝이 {int(r['shiny']*100)}%")
-        rod_path = os.path.join(ROD_DIR, r["img"])
+        rod_path = os.path.join(ROD_DIR, RODS[tier]["img"])
         if os.path.exists(rod_path):
-            await interaction.response.send_message(text, file=discord.File(rod_path, "rod.png"))
+            await interaction.response.send_message("🎉 " + msg, file=discord.File(rod_path, "rod.png"))
         else:
-            await interaction.response.send_message(text)
+            await interaction.response.send_message("🎉 " + msg)
 
     # ---- 낚싯대 강화 / 상태 ----
     @app_commands.command(name="낚시스탯", description="낚시 종합 스탯 (낚싯대·효과·강화·기록·순위·자산)")
