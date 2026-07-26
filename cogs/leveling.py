@@ -178,21 +178,33 @@ class Leveling(commands.Cog):
 
     @app_commands.command(name="레벨순위", description="전체 누적 음성 시간(레벨) 순위 TOP 10")
     async def leaderboard(self, interaction: discord.Interaction):
+        gid = interaction.guild.id
         conn = vt.db()
         rows = conn.execute(
             "SELECT user_id, SUM(seconds) AS total FROM voice_sessions "
-            "WHERE guild_id=? GROUP BY user_id ORDER BY total DESC LIMIT 10",
-            (interaction.guild.id,),
+            "WHERE guild_id=? GROUP BY user_id",
+            (gid,),
         ).fetchall()
         conn.close()
 
-        if not rows:
+        # DB 확정분에 진행 중 세션(ongoing)을 얹어서 순위를 매긴다.
+        # LIMIT 을 DB 에서 걸지 않는 이유: 진행 중분을 더하면 순위가 바뀔 수 있어서
+        # 전체를 모아 합산·재정렬한 뒤 상위 10명을 자른다. 지금 막 들어와 DB 기록이
+        # 아직 없는 접속자도 self.active 를 훑어 포함한다.
+        totals = {user_id: total for user_id, total in rows}
+        for (g, uid) in list(self.active.keys()):
+            if g == gid:
+                totals[uid] = totals.get(uid, 0) + self._ongoing(gid, uid)
+
+        ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[:10]
+
+        if not ranked:
             await interaction.response.send_message("아직 집계된 활동이 없어요.", ephemeral=True)
             return
 
         lines = []
         medals = ["🥇", "🥈", "🥉"]
-        for i, (user_id, total) in enumerate(rows):
+        for i, (user_id, total) in enumerate(ranked):
             member = interaction.guild.get_member(user_id)
             name = member.display_name if member else f"(나간 유저 {user_id})"
             rank = medals[i] if i < 3 else f"{i + 1}."
