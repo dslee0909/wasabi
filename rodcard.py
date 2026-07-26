@@ -12,31 +12,33 @@ from PIL import Image, ImageDraw, ImageFilter
 
 import fonts
 
-# 상점 배너 레이아웃 (render_shop 전용 — 다른 렌더러는 각자 W 를 따로 잡는다).
+# 상점 배너 레이아웃 (render_shop 전용 — 2열 그리드).
 #
-# 디스코드는 첨부 이미지를 대략 550x350 상자에 맞춰 축소해서 보여준다. 낚싯대가 7개라
-# 세로로 길어지기 쉬운데, 길수록 축소가 심해져 글씨가 오히려 작아진다.
-# (예전 660x928 은 38% 로 줄어 25px 이름이 화면에서 9px 이 됐다.)
-# 그래서 키우고 싶으면 픽셀을 늘리지 말고 세로를 짧게 만들 것 — 촘촘할수록 크게 보인다.
-PAD = 12
-ROW_H = 64
-ROW_GAP = 6
-ART = 54
-HEADER = 42
-W = 560
+# 디스코드는 첨부 이미지를 대략 550x350 상자에 맞춰 축소해서 보여준다. 세로로 길수록
+# 축소가 심해져 글씨가 작아진다(옛 560x608 단열은 58%로 줄어 14px 스펙이 8px가 됐다).
+# 그래서 8개 낚싯대를 2열×4행으로 눕혀 가로세로비(≈1.5:1)를 상자에 맞춰 축소를 최소화한다.
+PAD = 16
+HEADER = 48
+COL_GAP = 14
+ROW_GAP = 10
+CELL_H = 92
+ART = 64
+W = 720
+COL_W = (W - 2 * PAD - COL_GAP) // 2
 
-F_TITLE, F_NAME, F_EFF, F_PRICE = 22, 21, 14, 18
+F_TITLE, F_NAME, F_EFF, F_PRICE = 26, 24, 19, 21
 
 GOLD = (255, 205, 60, 255)
 WHITE = (238, 238, 238, 255)
-GREY = (165, 170, 178, 255)
+GREY = (178, 183, 190, 255)
 GREEN = (110, 210, 130, 255)
 BG = (22, 24, 28, 255)
 
-# 레어도별 강조색 (나무·강철·황금·다이아·용왕·전설)
+# 레어도별 강조색 (나무·강철·황금·다이아·용왕·전설·영혼·와사비)
 ACCENTS = [
     (170, 110, 60), (150, 160, 172), (222, 180, 70),
     (90, 200, 222), (210, 80, 95), (190, 130, 240),
+    (90, 210, 200), (150, 215, 90),
 ]
 
 
@@ -81,48 +83,49 @@ def _cover(im, W, H):
 
 
 def render_shop(entries: list[dict], title: str, rod_dir: str) -> io.BytesIO:
-    """entries: [{name, img, price_str, effect, owned}] 순서대로 배너 카드로 그림."""
+    """entries: [{name, img, price_str, effect, owned}] 를 2열 그리드 카드로 그림."""
     n = len(entries)
-    H = HEADER + n * (ROW_H + ROW_GAP) + PAD - ROW_GAP
+    rows = (n + 1) // 2
+    H = HEADER + rows * (CELL_H + ROW_GAP) - ROW_GAP + PAD
     canvas = Image.new("RGBA", (W, H), BG)
     draw = ImageDraw.Draw(canvas)
-    draw.text((PAD, PAD - 4), title, font=_font(F_TITLE), fill=GOLD)
+    draw.text((PAD, PAD - 2), title, font=_font(F_TITLE), fill=GOLD)
 
     name_font = _font(F_NAME)
     eff_font = _font(F_EFF)
     price_font = _font(F_PRICE)
 
     for i, e in enumerate(entries):
+        col, row = i % 2, i // 2
+        x0 = PAD + col * (COL_W + COL_GAP)
+        y = HEADER + row * (CELL_H + ROW_GAP)
+        x1 = x0 + COL_W
         accent = ACCENTS[i % len(ACCENTS)]
-        y = HEADER + i * (ROW_H + ROW_GAP)
-        x0, x1 = PAD, W - PAD
         row_bg = (int(accent[0] * 0.18) + 24, int(accent[1] * 0.18) + 24, int(accent[2] * 0.18) + 24, 255)
 
-        draw.rounded_rectangle([x0, y, x1, y + ROW_H], radius=10, fill=row_bg)
+        draw.rounded_rectangle([x0, y, x1, y + CELL_H], radius=12, fill=row_bg)
         # 왼쪽 레어도 색 스트라이프
-        draw.rounded_rectangle([x0, y, x0 + 6, y + ROW_H], radius=4, fill=accent + (255,))
+        draw.rounded_rectangle([x0, y, x0 + 7, y + CELL_H], radius=4, fill=accent + (255,))
         # 보유 시 금테
         if e["owned"]:
-            draw.rounded_rectangle([x0, y, x1, y + ROW_H], radius=10, outline=GOLD, width=3)
+            draw.rounded_rectangle([x0, y, x1, y + CELL_H], radius=12, outline=GOLD, width=3)
 
-        # 아트 썸네일
-        ax, ay = x0 + 12, y + (ROW_H - ART) // 2
+        # 아트 썸네일 (왼쪽, 세로 중앙)
+        ax, ay = x0 + 14, y + (CELL_H - ART) // 2
         img_path = os.path.join(rod_dir, e["img"])
         if os.path.exists(img_path):
             im = Image.open(img_path).convert("RGBA").resize((ART, ART), Image.LANCZOS)
             canvas.alpha_composite(im, (ax, ay))
 
+        # 오른쪽 텍스트 3줄: 이름 / 효과 / 가격(or 보유중)
         tx = ax + ART + 12
-        draw.text((tx, y + 8), e["name"], font=name_font, fill=WHITE)
-        draw.text((tx, y + 36), e["effect"], font=eff_font, fill=GREY)
-
-        # 오른쪽: 가격 또는 보유중
+        draw.text((tx, y + 11), e["name"], font=name_font, fill=WHITE)
+        draw.text((tx, y + 11 + F_NAME + 6), e["effect"], font=eff_font, fill=GREY)
         if e["owned"]:
-            label, col = "보유중", GREEN
+            label, lcol = "보유중", GREEN
         else:
-            label, col = e["price_str"], GOLD
-        lw = draw.textlength(label, font=price_font)
-        draw.text((x1 - 12 - lw, y + ROW_H / 2 - F_PRICE / 2 - 2), label, font=price_font, fill=col)
+            label, lcol = e["price_str"], GOLD
+        draw.text((tx, y + 11 + F_NAME + 6 + F_EFF + 6), label, font=price_font, fill=lcol)
 
     out = io.BytesIO()
     canvas.convert("RGB").save(out, "PNG")
