@@ -92,6 +92,20 @@ ENHANCE_SHINY = 0.003   # 강화 +1당 반짝이 확률 +0.3%p (반짝이는 10�
 # (좋은 낚싯대일수록 티어당 -0.15초, 하한 2.0 — 위 RODS 의 cd 열이 그 결과).
 FISH_COOLDOWN = 4.0
 
+# 소모품(미끼) — 횟수제 버프. 상점 '소모품' 탭에서 사고, /가방 에서 사용.
+#   charges: 사용 시 부여되는 낚시 횟수(낚은 경우에만 1씩 소모)
+#   coin_mult: 낚은 코인에 곱하는 배수 / shiny_add: 반짝이 확률에 더하는 값(+%p)
+#   여러 미끼를 동시에 켜면 코인배수는 곱연산, 반짝이는 합연산으로 중첩된다.
+CONSUMABLES = {
+    "worm":  {"name": "지렁이 미끼", "emoji": "🪱", "price": 400,   "charges": 15,
+              "coin_mult": 1.20, "shiny_add": 0.00, "desc": "코인 획득 +20% · 15회"},
+    "shiny": {"name": "반짝이 미끼", "emoji": "✨", "price": 700,   "charges": 10,
+              "coin_mult": 1.00, "shiny_add": 0.10, "desc": "반짝이 확률 +10%p · 10회"},
+    "gold":  {"name": "황금 미끼",   "emoji": "💰", "price": 1_000, "charges": 10,
+              "coin_mult": 1.50, "shiny_add": 0.00, "desc": "코인 배수 +50% · 10회"},
+}
+CONSUMABLE_ORDER = ["worm", "shiny", "gold"]  # 상점·가방 표시 순서
+
 
 def enhance_cost(level: int) -> int:
     """강화도(level)에서 +1 하는 비용. 낚싯대 티어와 무관 (강화도는 승계되므로 일관성 유지).
@@ -275,7 +289,7 @@ class ForgeView(discord.ui.View):
 # (key, 이모지, 라벨, 사용가능). 준비중 카테고리는 자리만 잡아두고, 나중에 만들면 available=True.
 SHOP_CATEGORIES = [
     ("rod", "🎣", "낚싯대", True),
-    ("consumable", "🧪", "소모품", False),
+    ("consumable", "🧪", "소모품", True),
     ("role", "🎭", "전용 역할", False),
 ]
 
@@ -316,7 +330,23 @@ class RodBuyButton(discord.ui.Button):
 
     async def callback(self, interaction: discord.Interaction):
         view: "ShopView" = self.view
-        await view.cog._confirm_purchase(interaction, self.tier)
+        await view.cog._confirm_purchase(interaction, "rod", self.tier)
+
+
+class ConsumableBuyButton(discord.ui.Button):
+    """소모품 구매 버튼 (반복 구매 가능, 코인 부족 시 비활성)."""
+    def __init__(self, key: str, wallet: int, row: int):
+        c = CONSUMABLES[key]
+        affordable = wallet >= c["price"]
+        super().__init__(
+            style=discord.ButtonStyle.primary if affordable else discord.ButtonStyle.secondary,
+            label=f"{c['name']} · {c['price']:,}", emoji=c["emoji"],
+            disabled=not affordable, row=row)
+        self.key = key
+
+    async def callback(self, interaction: discord.Interaction):
+        view: "ShopView" = self.view
+        await view.cog._confirm_purchase(interaction, "consumable", self.key)
 
 
 class ShopView(discord.ui.View):
@@ -333,6 +363,10 @@ class ShopView(discord.ui.View):
             wallet = vt.get_balance(gid, uid)
             for t in ROD_TIERS:
                 self.add_item(RodBuyButton(t, my, wallet))
+        elif category == "consumable":
+            wallet = vt.get_balance(gid, uid)
+            for i, k in enumerate(CONSUMABLE_ORDER):
+                self.add_item(ConsumableBuyButton(k, wallet, row=1 + i // 4))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.uid:
@@ -343,27 +377,63 @@ class ShopView(discord.ui.View):
 
 
 class ConfirmPurchaseView(discord.ui.View):
-    """구매 확인 (모든 구매 전 필수). 본인 전용, 1분."""
-    def __init__(self, cog, gid: int, uid: int, tier: int):
+    """구매 확인 (모든 구매 전 필수). 본인 전용, 1분. kind=rod|consumable."""
+    def __init__(self, cog, gid: int, uid: int, kind: str, key):
         super().__init__(timeout=60)
         self.cog = cog
         self.gid = gid
         self.uid = uid
-        self.tier = tier
+        self.kind = kind
+        self.key = key
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.uid
 
     @discord.ui.button(label="구매 확정", emoji="✅", style=discord.ButtonStyle.success)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-        ok, msg = self.cog._try_purchase_rod(self.gid, self.uid, self.tier)
+        if self.kind == "rod":
+            ok, msg = self.cog._try_purchase_rod(self.gid, self.uid, self.key)
+        else:
+            ok, msg = self.cog._try_purchase_consumable(self.gid, self.uid, self.key)
         note = ("🎉 " + msg) if ok else ("⚠️ " + msg)
-        await self.cog._render_shop(interaction, self.gid, self.uid, "rod", note=note, edit=True)
+        await self.cog._render_shop(interaction, self.gid, self.uid, self.kind, note=note, edit=True)
 
     @discord.ui.button(label="취소", emoji="✖️", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog._render_shop(interaction, self.gid, self.uid, "rod",
+        await self.cog._render_shop(interaction, self.gid, self.uid, self.kind,
                                     note="구매를 취소했어요.", edit=True)
+
+
+class UseItemButton(discord.ui.Button):
+    """가방의 소모품 사용 버튼."""
+    def __init__(self, key: str, count: int):
+        c = CONSUMABLES[key]
+        super().__init__(style=discord.ButtonStyle.primary,
+                         label=f"{c['name']} 사용 ({count})", emoji=c["emoji"])
+        self.key = key
+
+    async def callback(self, interaction: discord.Interaction):
+        view: "BagView" = self.view
+        await view.cog._use_consumable(interaction, self.key)
+
+
+class BagView(discord.ui.View):
+    """가방 (본인 전용, 3분). 보유 소모품별 사용 버튼."""
+    def __init__(self, cog, gid: int, uid: int):
+        super().__init__(timeout=180)
+        self.cog = cog
+        self.gid = gid
+        self.uid = uid
+        inv = vt.get_inventory(gid, uid)
+        for k in CONSUMABLE_ORDER:
+            if inv.get(k, 0) > 0:
+                self.add_item(UseItemButton(k, inv[k]))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.uid:
+            await interaction.response.send_message("본인 가방만 열 수 있어요. `/가방` 으로 여세요.", ephemeral=True)
+            return False
+        return True
 
 
 class Economy(commands.Cog):
@@ -703,6 +773,18 @@ class Economy(commands.Cog):
         return True, (f"**{r['emoji']} {r['name']}** 구매 & 장착 완료!  "
                       f"(코인 x{r['mult']} · 반짝이 {int(r['shiny']*100)}%)")
 
+    def _try_purchase_consumable(self, gid: int, uid: int, key: str) -> tuple[bool, str]:
+        """소모품 구매 시도 (반복 구매 가능). (성공여부, 메시지). 성공 시 차감+인벤 +1."""
+        c = CONSUMABLES[key]
+        wallet = vt.get_balance(gid, uid)
+        if wallet < c["price"]:
+            return False, (f"코인이 부족해요. (지갑 {coins(wallet)} / 가격 {coins(c['price'])})\n"
+                           f"은행에 있으면 `/출금` 먼저 하세요.")
+        vt.add_balance(gid, uid, -c["price"])
+        vt.add_item(gid, uid, key, 1)
+        have = vt.get_inventory(gid, uid).get(key, 0)
+        return True, f"**{c['emoji']} {c['name']}** 구매 완료! (보유 {have}개) · `/가방` 에서 사용"
+
     def _rod_shop_file(self, gid: int, uid: int):
         """낚싯대 상점 이미지(discord.File). 렌더 실패 시 None."""
         my = vt.get_rod(gid, uid)
@@ -734,6 +816,15 @@ class Economy(commands.Cog):
                 content += "\n" + "\n".join(
                     f"{RODS[t]['emoji']} {RODS[t]['name']} — "
                     f"{'보유중' if my >= t else _price_label(t)}" for t in ROD_TIERS)
+        elif category == "consumable":
+            inv = vt.get_inventory(gid, uid)
+            lines = ["🧪 **소모품 상점** — 미끼는 낚시에 버프를 줘요. 사면 `/가방` 에서 사용하세요."]
+            for k in CONSUMABLE_ORDER:
+                c = CONSUMABLES[k]
+                have = inv.get(k, 0)
+                lines.append(f"{c['emoji']} **{c['name']}** — {coins(c['price'])}  ·  {c['desc']}"
+                             + (f"  (보유 {have})" if have else ""))
+            content = "\n".join(lines)
         else:
             cat = next(c for c in SHOP_CATEGORIES if c[0] == category)
             content = f"🚧 **{cat[2]}** 은(는) 준비 중이에요. 곧 만나요!"
@@ -747,26 +838,76 @@ class Economy(commands.Cog):
         else:
             await interaction.response.send_message(content=content, view=view, ephemeral=True)
 
-    async def _confirm_purchase(self, interaction: discord.Interaction, tier: int):
-        """구매 버튼 클릭 → 확인 창(구매 확정/취소)으로 전환."""
+    async def _confirm_purchase(self, interaction: discord.Interaction, kind: str, key):
+        """구매 버튼 클릭 → 확인 창(구매 확정/취소)으로 전환. kind=rod|consumable."""
         gid, uid = interaction.guild.id, interaction.user.id
-        r = RODS[tier]
         wallet = vt.get_balance(gid, uid)
-        instock = isinstance(r["price"], int)
-        after = wallet - r["price"] if instock else wallet
+        if kind == "rod":
+            r = RODS[key]
+            instock = isinstance(r["price"], int)
+            name, emoji = r["name"], r["emoji"]
+            price = r["price"] if instock else None
+            effect = f"코인 x{r['mult']} · 반짝이 {int(r['shiny']*100)}%"
+        else:
+            c = CONSUMABLES[key]
+            instock, price = True, c["price"]
+            name, emoji, effect = c["name"], c["emoji"], c["desc"]
+        after = wallet - price if price is not None else wallet
         content = (
             f"🛒 **구매 확인**\n"
-            f"{r['emoji']} **{r['name']}**  —  {coins(r['price']) if instock else '입고중'}\n"
-            f"효과: 코인 x{r['mult']} · 반짝이 {int(r['shiny']*100)}%\n"
+            f"{emoji} **{name}**  —  {coins(price) if price is not None else '입고중'}\n"
+            f"효과: {effect}\n"
             f"지갑: {coins(wallet)} → {coins(after)}\n\n"
             f"구매하시겠어요?"
         )
         await interaction.response.edit_message(
-            content=content, attachments=[], view=ConfirmPurchaseView(self, gid, uid, tier))
+            content=content, attachments=[], view=ConfirmPurchaseView(self, gid, uid, kind, key))
 
     @app_commands.command(name="상점", description="상점 — 낚싯대·아이템을 버튼으로 구매합니다")
     async def shop(self, interaction: discord.Interaction):
         await self._render_shop(interaction, interaction.guild.id, interaction.user.id, "rod")
+
+    # ---- 가방 🎒 (소모품 보유·사용) ----
+    async def _render_bag(self, interaction: discord.Interaction, gid: int, uid: int,
+                          note: str = "", edit: bool = False):
+        inv = vt.get_inventory(gid, uid)
+        active = vt.get_active_effects(gid, uid)
+        lines = ["🎒 **가방**"]
+        if active:
+            lines.append("\n__적용 중인 미끼__")
+            for k, ch in active.items():
+                if k in CONSUMABLES:
+                    c = CONSUMABLES[k]
+                    lines.append(f"{c['emoji']} {c['name']} — 남은 **{ch}회** ({c['desc'].split(' · ')[0]})")
+        owned = [(k, inv[k]) for k in CONSUMABLE_ORDER if inv.get(k, 0) > 0]
+        if owned:
+            lines.append("\n__보유 소모품__ (버튼으로 사용)")
+            for k, cnt in owned:
+                c = CONSUMABLES[k]
+                lines.append(f"{c['emoji']} {c['name']} ×{cnt} — {c['desc']}")
+        else:
+            lines.append("\n보유한 소모품이 없어요. `/상점` → 🧪 소모품 에서 구매하세요!")
+        content = "\n".join(lines)
+        if note:
+            content = f"{note}\n\n{content}"
+        view = BagView(self, gid, uid)
+        if edit:
+            await interaction.response.edit_message(content=content, view=view)
+        else:
+            await interaction.response.send_message(content=content, view=view, ephemeral=True)
+
+    async def _use_consumable(self, interaction: discord.Interaction, key: str):
+        gid, uid = interaction.guild.id, interaction.user.id
+        c = CONSUMABLES[key]
+        if vt.use_item(gid, uid, key, c["charges"]):
+            note = f"{c['emoji']} **{c['name']}** 사용! 이제부터 {c['desc']} 적용돼요."
+        else:
+            note = f"⚠️ **{c['name']}** 을 보유하고 있지 않아요."
+        await self._render_bag(interaction, gid, uid, note=note, edit=True)
+
+    @app_commands.command(name="가방", description="보유한 소모품을 보고 버튼으로 사용합니다")
+    async def bag(self, interaction: discord.Interaction):
+        await self._render_bag(interaction, interaction.guild.id, interaction.user.id)
 
     @app_commands.command(name="구매", description="낚싯대를 구매합니다 (지갑 코인 사용)")
     @app_commands.describe(낚싯대="구매할 낚싯대")
@@ -971,10 +1112,18 @@ class Economy(commands.Cog):
             return
         self._fish_cd[key] = time.time()
 
+        # 활성 미끼(버프): 반짝이 확률은 합연산, 코인 배수는 곱연산으로 중첩
+        active_bait = vt.get_active_effects(gid, user.id)
+        bait_shiny = sum(CONSUMABLES[k]["shiny_add"] for k in active_bait if k in CONSUMABLES)
+        bait_coin = 1.0
+        for k in active_bait:
+            if k in CONSUMABLES:
+                bait_coin *= CONSUMABLES[k]["coin_mult"]
+
         name, emoji, value, _, img = random.choices(FISH, weights=[f[3] for f in FISH])[0]
 
-        # 꽝이 아니면 (낚싯대 + 강화) 확률로 '반짝이는' 버전 (가격 10배, 전용 이미지)
-        shiny_p = rod["shiny"] + ENHANCE_SHINY * enh
+        # 꽝이 아니면 (낚싯대 + 강화 + 미끼) 확률로 '반짝이는' 버전 (가격 10배, 전용 이미지)
+        shiny_p = rod["shiny"] + ENHANCE_SHINY * enh + bait_shiny
         shiny = value > 0 and random.random() < shiny_p
         if shiny:
             value *= SHINY_MULT
@@ -983,9 +1132,11 @@ class Economy(commands.Cog):
         else:
             path = os.path.join(ASSETS_DIR, img)
         if value > 0:
-            value = int(value * rod["mult"] * (1 + enh * ENHANCE_BONUS))  # 낚싯대 배수 + 강화 보너스
+            value = int(value * rod["mult"] * (1 + enh * ENHANCE_BONUS) * bait_coin)  # 낚싯대·강화·미끼
             vt.add_catch(gid, user.id, name, shiny)  # 도감 기록
             vt.add_fish_earned(gid, user.id, value)  # 낚시 누적 수익
+            if active_bait:
+                vt.tick_active_effects(gid, user.id)  # 낚은 경우에만 미끼 1회 소모
         file = discord.File(path, filename="fish.png") if os.path.exists(path) else None
 
         plus = f" +{enh}" if enh else ""
@@ -998,6 +1149,13 @@ class Economy(commands.Cog):
         else:
             bal = vt.add_balance(gid, user.id, value)
             text = f"{head}\n{emoji} **{name}** 낚음! **+{coins(value)}**\n잔액: {coins(bal)}"
+
+        # 미끼가 적용된 낚시면 남은 횟수를 표시
+        if value > 0 and active_bait:
+            remain = vt.get_active_effects(gid, user.id)
+            tags = " ".join(f"{CONSUMABLES[k]['emoji']}{n}" for k, n in remain.items() if k in CONSUMABLES)
+            if tags:
+                text += f"\n🪝 미끼 {tags}"
 
         view = FishView(self, user.id)
         no_ping = discord.AllowedMentions.none()

@@ -88,6 +88,26 @@ def db():
                PRIMARY KEY (guild_id, user_id)
            )"""
     )
+    conn.execute(
+        # 소모품 보유 수량 (미사용 재고)
+        """CREATE TABLE IF NOT EXISTS inventory (
+               guild_id INTEGER NOT NULL,
+               user_id INTEGER NOT NULL,
+               item_key TEXT NOT NULL,
+               count INTEGER NOT NULL DEFAULT 0,
+               PRIMARY KEY (guild_id, user_id, item_key)
+           )"""
+    )
+    conn.execute(
+        # 사용 중인 미끼의 남은 횟수 (횟수제 버프). 0 이 되면 삭제.
+        """CREATE TABLE IF NOT EXISTS active_effects (
+               guild_id INTEGER NOT NULL,
+               user_id INTEGER NOT NULL,
+               item_key TEXT NOT NULL,
+               charges INTEGER NOT NULL DEFAULT 0,
+               PRIMARY KEY (guild_id, user_id, item_key)
+           )"""
+    )
     # 기존 DB 마이그레이션: 없으면 컬럼 추가 (이미 있으면 무시)
     for col, decl in (("channel_id", "INTEGER"), ("started_at", "REAL")):
         try:
@@ -354,6 +374,66 @@ def has_caught_shiny(guild_id: int, user_id: int, fish_key: str) -> bool:
     ).fetchone()
     conn.close()
     return row is not None
+
+
+# ---- 소모품 인벤토리 / 미끼 버프 (아이템 효과는 economy 의 CONSUMABLES 가 해석) ----
+def add_item(guild_id: int, user_id: int, item_key: str, n: int = 1):
+    """인벤토리에 소모품 n개 추가."""
+    conn = db()
+    conn.execute("INSERT OR IGNORE INTO inventory (guild_id,user_id,item_key,count) VALUES (?,?,?,0)",
+                 (guild_id, user_id, item_key))
+    conn.execute("UPDATE inventory SET count=count+? WHERE guild_id=? AND user_id=? AND item_key=?",
+                 (n, guild_id, user_id, item_key))
+    conn.commit()
+    conn.close()
+
+
+def get_inventory(guild_id: int, user_id: int) -> dict:
+    """{item_key: 보유수량} (수량>0 만)."""
+    conn = db()
+    rows = conn.execute("SELECT item_key, count FROM inventory WHERE guild_id=? AND user_id=? AND count>0",
+                        (guild_id, user_id)).fetchall()
+    conn.close()
+    return {k: c for k, c in rows}
+
+
+def use_item(guild_id: int, user_id: int, item_key: str, charges: int) -> bool:
+    """인벤 1개 소모 → active_effects 에 charges 만큼 추가(누적). 재고 없으면 False."""
+    conn = db()
+    row = conn.execute("SELECT count FROM inventory WHERE guild_id=? AND user_id=? AND item_key=?",
+                       (guild_id, user_id, item_key)).fetchone()
+    if not row or row[0] <= 0:
+        conn.close()
+        return False
+    conn.execute("UPDATE inventory SET count=count-1 WHERE guild_id=? AND user_id=? AND item_key=?",
+                 (guild_id, user_id, item_key))
+    conn.execute("INSERT OR IGNORE INTO active_effects (guild_id,user_id,item_key,charges) VALUES (?,?,?,0)",
+                 (guild_id, user_id, item_key))
+    conn.execute("UPDATE active_effects SET charges=charges+? WHERE guild_id=? AND user_id=? AND item_key=?",
+                 (charges, guild_id, user_id, item_key))
+    conn.commit()
+    conn.close()
+    return True
+
+
+def get_active_effects(guild_id: int, user_id: int) -> dict:
+    """{item_key: 남은횟수} (남은>0 만)."""
+    conn = db()
+    rows = conn.execute("SELECT item_key, charges FROM active_effects WHERE guild_id=? AND user_id=? AND charges>0",
+                        (guild_id, user_id)).fetchall()
+    conn.close()
+    return {k: c for k, c in rows}
+
+
+def tick_active_effects(guild_id: int, user_id: int):
+    """활성 미끼 전부 1회씩 소모, 0 이하가 된 건 삭제. (낚시 1회당 호출)"""
+    conn = db()
+    conn.execute("UPDATE active_effects SET charges=charges-1 WHERE guild_id=? AND user_id=?",
+                 (guild_id, user_id))
+    conn.execute("DELETE FROM active_effects WHERE guild_id=? AND user_id=? AND charges<=0",
+                 (guild_id, user_id))
+    conn.commit()
+    conn.close()
 
 
 def duo_count_over(guild_id: int, user_id: int, min_seconds: int, days: int = 3650) -> int:
