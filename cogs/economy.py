@@ -70,26 +70,26 @@ FORGE_IDLE_BG = os.path.join(ASSETS_DIR, "forge_idle.png")        # 강화 대�
 STATUS_BG = os.path.join(ASSETS_DIR, "status_bg.png")            # 낚시 스탯창 배경 (선택)
 
 # 낚싯대 상점 (tier: 이름, 이모지, 가격, 코인배수, 반짝이확률, cd, cap, 이미지파일)
-#   cd: 원래 낚싯대별 쿨타임이었으나 현재 쿨타임은 FISH_COOLDOWN 으로 고정. 필드는 보존.
+#   cd: 낚싯대별 낚시 쿨타임(초). 티어0=5.0 기준, 좋은 낚싯대일수록 티어당 -0.15초 (하한 2.0).
 #   cap: 강화 상한
 RODS = {
-    0: {"name": "기본 낚싯대", "emoji": "🎣", "price": 0,         "mult": 1.0, "shiny": 0.08, "cd": 2.0, "cap": 0,  "img": "rod_0_basic.png"},
-    1: {"name": "나무 낚싯대", "emoji": "🪵", "price": 50_000,    "mult": 1.2, "shiny": 0.10, "cd": 2.0, "cap": 2,  "img": "rod_1_wood.png"},
-    2: {"name": "강철 낚싯대", "emoji": "⚙️", "price": 150_000,   "mult": 1.5, "shiny": 0.11, "cd": 1.8, "cap": 4,  "img": "rod_2_steel.png"},
-    3: {"name": "황금 낚싯대", "emoji": "🥇", "price": 300_000,   "mult": 2.0, "shiny": 0.12, "cd": 1.5, "cap": 6,  "img": "rod_3_gold.png"},
-    4: {"name": "다이아 낚싯대", "emoji": "💎", "price": 800_000,   "mult": 2.5, "shiny": 0.14, "cd": 1.2, "cap": 8,  "img": "rod_4_diamond.png"},
-    5: {"name": "용왕의 낚싯대", "emoji": "🐉", "price": 2_200_000, "mult": 3.0, "shiny": 0.16, "cd": 1.0, "cap": 10, "img": "rod_5_dragon.png"},
-    6: {"name": "전설의 낚싯대", "emoji": "👑", "price": 8_000_000, "mult": 4.0, "shiny": 0.18, "cd": 0.8, "cap": 12, "img": "rod_6_legendary.png"},
-    7: {"name": "입고중", "emoji": "⚡", "price": '?', "mult": 5.0, "shiny": 0.20, "cd": 0.5, "cap": 15, "img": "rod_7_god.png"}
+    0: {"name": "기본 낚싯대",   "emoji": "🎣", "price": 0,         "mult": 1.0, "shiny": 0.08, "cd": 5.00, "cap": 0,  "img": "rod_0_basic.png"},
+    1: {"name": "나무 낚싯대",   "emoji": "🪵", "price": 50_000,    "mult": 1.2, "shiny": 0.10, "cd": 4.85, "cap": 2,  "img": "rod_1_wood.png"},
+    2: {"name": "강철 낚싯대",   "emoji": "⚙️", "price": 150_000,   "mult": 1.5, "shiny": 0.11, "cd": 4.70, "cap": 4,  "img": "rod_2_steel.png"},
+    3: {"name": "황금 낚싯대",   "emoji": "🥇", "price": 300_000,   "mult": 2.0, "shiny": 0.12, "cd": 4.55, "cap": 6,  "img": "rod_3_gold.png"},
+    4: {"name": "다이아 낚싯대", "emoji": "💎", "price": 800_000,   "mult": 2.5, "shiny": 0.14, "cd": 4.40, "cap": 8,  "img": "rod_4_diamond.png"},
+    5: {"name": "용왕의 낚싯대", "emoji": "🐉", "price": 2_200_000, "mult": 3.0, "shiny": 0.16, "cd": 4.25, "cap": 10, "img": "rod_5_dragon.png"},
+    6: {"name": "전설의 낚싯대", "emoji": "👑", "price": 8_000_000, "mult": 4.0, "shiny": 0.18, "cd": 4.10, "cap": 12, "img": "rod_6_legendary.png"},
+    7: {"name": "영혼 낚시대",   "emoji": "🔮", "price": '?',       "mult": 5.0, "shiny": 0.20, "cd": 3.95, "cap": 15, "img": "rod_7_soul.png"},
+    8: {"name": "와사비 낚시대", "emoji": "🍃", "price": '?',       "mult": 6.0, "shiny": 0.21, "cd": 3.80, "cap": 18, "img": "rod_8_wasabi.png"},
 }
-ROD_TIERS = (1, 2, 3, 4, 5, 6, 7)  # 상점에 나오는 낚싯대 티어
+ROD_TIERS = (1, 2, 3, 4, 5, 6, 7, 8)  # 상점에 나오는 낚싯대 티어
 
 ENHANCE_BONUS = 0.015   # 강화 +1당 코인 획득 +1.5%
 ENHANCE_SHINY = 0.003   # 강화 +1당 반짝이 확률 +0.3%p (반짝이는 10배라 실효 상승은 더 큼)
 
-# 낚시 쿨타임(초). 모든 낚싯대 공통 고정값.
-# (RODS 의 'cd' 필드는 현재 쿨타임에 쓰지 않는다 — 낚싯대별 속도 차이는
-#  강화 시스템 개편 때 다시 다룰 예정이라 데이터만 남겨둔다.)
+# 낚시 쿨타임(초) 티어0 기준값. 실제 쿨타임은 낚싯대별 RODS[t]['cd'] 를 쓴다
+# (좋은 낚싯대일수록 티어당 -0.15초, 하한 2.0 — 위 RODS 의 cd 열이 그 결과).
 FISH_COOLDOWN = 5.0
 
 
@@ -397,9 +397,9 @@ class Economy(commands.Cog):
         await self._spot_list(interaction, "forge_channels", "대장간")
 
     @낚시관리.command(name="낚싯대", description="멤버의 낚싯대 티어를 설정합니다")
-    @app_commands.describe(멤버="대상", 티어="0=기본, 1~6")
+    @app_commands.describe(멤버="대상", 티어="0=기본, 1~8")
     @app_commands.choices(티어=[
-        app_commands.Choice(name=f"{t}: {RODS[t]['name']}", value=t) for t in range(0, 7)
+        app_commands.Choice(name=f"{t}: {RODS[t]['name']}", value=t) for t in range(0, 9)
     ])
     @owner_only()
     async def admin_set_rod(self, interaction: discord.Interaction, 멤버: discord.Member, 티어: app_commands.Choice[int]):
@@ -690,7 +690,7 @@ class Economy(commands.Cog):
             ("낚싯대 효과", (90, 205, 120), [
                 ("💰", f"코인 배수  x{eff_mult:.2f}" + (f"  (+강화 {int(bonus*100)}%)" if enh else "")),
                 ("✨", f"반짝이 확률  {eff_shiny*100:.1f}%" + (f"  (+강화 {ENHANCE_SHINY*enh*100:.1f}%p)" if enh else "")),
-                ("⏱️", f"쿨다운  {FISH_COOLDOWN:g}초"),
+                ("⏱️", f"쿨다운  {r['cd']:g}초"),
                 ("🔨", f"강화  +{enh} / 최대 +{r['cap']}"),
             ]),
             ("낚시 기록", (85, 160, 235), [
@@ -844,7 +844,7 @@ class Economy(commands.Cog):
         key = (gid, user.id)
         rod = RODS[vt.get_rod(gid, user.id)]  # 장착 낚싯대 효과
         enh = vt.get_rod_enhance(gid, user.id)  # 강화 레벨
-        left = self._cooldown_left(self._fish_cd, key, FISH_COOLDOWN)
+        left = self._cooldown_left(self._fish_cd, key, rod["cd"])
         if left:
             await interaction.response.send_message(f"⏳ {left:.1f}초 후에 다시 낚시할 수 있어요.", ephemeral=True)
             return
