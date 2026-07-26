@@ -12,7 +12,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from store import get_guild_config
+from store import get_guild_config, level_role_ladder
 
 
 class ServerConfig(commands.Cog):
@@ -60,10 +60,9 @@ class ServerConfig(commands.Cog):
 
         # ── 역할 ──
         auto = mark(self._role(guild, cfg.get("auto_role_id")))
-        promo_role = cfg.get("promote_role_id")
-        promo_lv = cfg.get("promote_level")
-        promote = (f"Lv.{promo_lv} 도달 시 {mark(self._role(guild, promo_role))}"
-                   if promo_role and promo_lv is not None else "—")
+        ladder = level_role_ladder(cfg)
+        promote = ("\n".join(f"Lv.{t['level']} {mark(self._role(guild, t['role_id']))}" for t in ladder)
+                   if ladder else "—")
         panels = cfg.get("reaction_panels", {})
         active = cfg.get("active_panel_by_channel", {})  # {채널: 메시지}
         if panels:

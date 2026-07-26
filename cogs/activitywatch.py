@@ -21,7 +21,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 import voicetime as vt
-from store import get_guild_config, update_guild_config
+from store import get_guild_config, update_guild_config, level_role_ladder
 
 NEWCOMER_GRACE_DAYS = 14      # 입장 후 이 기간이 지나면 신입 판정
 DEFAULT_PROMOTE_LEVEL = 10    # promote_level 미설정 시 기준 레벨
@@ -42,15 +42,18 @@ class ActivityWatch(commands.Cog):
     # ---- 판정 헬퍼 ----
     @staticmethod
     def _has_level_role(guild: discord.Guild, member: discord.Member, cfg: dict) -> bool:
-        """레벨10 역할 보유 여부. 역할 미설정 시 계산 레벨로 폴백."""
-        role_id = cfg.get("promote_role_id")
-        level = cfg.get("promote_level", DEFAULT_PROMOTE_LEVEL)
-        if role_id:
-            role = guild.get_role(role_id)
-            if role is not None:
-                return role in member.roles
+        """정착 여부 = 레벨 역할 사다리의 역할을 하나라도 보유(상호배타라 최고 1개).
+        사다리는 설정됐지만 아직 부여 전(방금 도달)이거나 미설정이면 계산 레벨로 폴백."""
+        ladder = level_role_ladder(cfg)
+        if ladder:
+            member_role_ids = {r.id for r in member.roles}
+            if any(t["role_id"] in member_role_ids for t in ladder):
+                return True
+            need = min(t["level"] for t in ladder)  # 사다리 최하단 = 정착 기준 레벨
+        else:
+            need = DEFAULT_PROMOTE_LEVEL
         total = vt.total_seconds(guild.id, member.id)
-        return vt.hours_to_level(total / 3600, guild.id) >= level
+        return vt.hours_to_level(total / 3600, guild.id) >= need
 
     @staticmethod
     def _days_since_join(member: discord.Member) -> float | None:

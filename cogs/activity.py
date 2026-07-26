@@ -18,7 +18,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 import voicetime as vt
-from store import get_guild_config, update_guild_config
+from store import get_guild_config, update_guild_config, level_role_ladder
 
 
 class Activity(commands.Cog):
@@ -35,18 +35,17 @@ class Activity(commands.Cog):
         default_permissions=discord.Permissions(manage_guild=True),
     )
 
-    # ---- 자동 승급 (5분마다): 전체 누적 '레벨' 기준 ----
+    # ---- 자동 승급 (5분마다): 전체 누적 '레벨' 기준, 상호배타 사다리 ----
     @tasks.loop(minutes=5)
     async def promote_loop(self):
         for guild in self.bot.guilds:
-            cfg = get_guild_config(guild.id)
-            role_id = cfg.get("promote_role_id")
-            need_level = cfg.get("promote_level")
-            if not role_id or not need_level:
+            ladder = level_role_ladder(get_guild_config(guild.id))
+            # 사다리를 실제 역할 객체로 (존재하는 것만), 레벨 오름차순
+            tiers = [(t["level"], guild.get_role(t["role_id"])) for t in ladder]
+            tiers = [(lv, r) for lv, r in tiers if r is not None]
+            if not tiers:
                 continue
-            role = guild.get_role(role_id)
-            if role is None:
-                continue
+            ladder_roles = {r for _, r in tiers}
 
             # 전체 누적 시간으로 각자의 레벨 계산
             conn = vt.db()
@@ -57,35 +56,81 @@ class Activity(commands.Cog):
             conn.close()
 
             for user_id, total in rows:
-                if vt.hours_to_level(total / 3600, guild.id) < need_level:
-                    continue
                 member = guild.get_member(user_id)
-                if member and role not in member.roles:
-                    try:
-                        await member.add_roles(role, reason=f"Lv.{need_level} 달성 자동 승급")
-                    except discord.Forbidden:
-                        pass
+                if member is None:
+                    continue
+                level = vt.hours_to_level(total / 3600, guild.id)
+                # 자격 되는 '가장 높은' 티어 하나만 목표 역할
+                target = None
+                for lv, role in tiers:  # 오름차순이라 마지막으로 통과한 게 최고 티어
+                    if level >= lv:
+                        target = role
+                have = set(member.roles)
+                to_add = [target] if target and target not in have else []
+                # 목표를 제외한 다른 사다리 역할은 전부 제거 (하위 레벨 역할 자동 탈락)
+                to_remove = [r for r in ladder_roles if r in have and r is not target]
+                try:
+                    if to_add:
+                        await member.add_roles(*to_add, reason=f"Lv.{level} 레벨 사다리 승급")
+                    if to_remove:
+                        await member.remove_roles(*to_remove, reason="상위 레벨 역할로 대체(하위 제거)")
+                except discord.Forbidden:
+                    pass
 
     @promote_loop.before_loop
     async def before_promote(self):
         await self.bot.wait_until_ready()
 
     # ---- /활동 승급 · 기간 · 잠수 ----
-    @활동.command(name="승급", description="특정 레벨에 도달하면 자동으로 줄 역할을 지정합니다")
-    @app_commands.describe(역할="자동 부여할 역할 (예: 정규)", 레벨="이 레벨 이상이면 자동 승급")
+    @활동.command(name="승급", description="레벨 역할 사다리에 단계를 추가/수정 (상위 달성 시 하위 자동 제거)")
+    @app_commands.describe(역할="부여할 역할", 레벨="이 레벨 이상이면 이 역할")
     @app_commands.checks.has_permissions(manage_roles=True)
     async def set_promote(self, interaction: discord.Interaction, 역할: discord.Role, 레벨: int):
+        if 레벨 < 1:
+            await interaction.response.send_message("레벨은 1 이상이어야 해요.", ephemeral=True)
+            return
         if 역할 >= interaction.guild.me.top_role:
             await interaction.response.send_message(
                 f"⚠️ 제 역할이 **{역할.name}** 보다 아래라 부여할 수 없어요. 봇 역할을 위로 올려주세요.",
                 ephemeral=True,
             )
             return
-        update_guild_config(interaction.guild.id, {"promote_role_id": 역할.id, "promote_level": 레벨})
-        need_hours = vt.level_to_hours(레벨, interaction.guild.id)
+        # 기존 사다리(레거시 단일설정 승계 포함)에서 같은 레벨/같은 역할 항목은 교체
+        ladder = level_role_ladder(get_guild_config(interaction.guild.id))
+        ladder = [t for t in ladder if t["level"] != 레벨 and t["role_id"] != 역할.id]
+        ladder.append({"level": 레벨, "role_id": 역할.id})
+        ladder.sort(key=lambda t: t["level"])
+        update_guild_config(interaction.guild.id, {"level_roles": ladder})
+        lines = "\n".join(f"Lv.{t['level']} → <@&{t['role_id']}>" for t in ladder)
         await interaction.response.send_message(
-            f"✅ **Lv.{레벨}**(총 {vt.format_duration(need_hours * 3600)}) 이상이면 "
-            f"**{역할.name}** 역할을 자동 부여해요. (5분마다 확인)",
+            f"✅ 레벨 역할 사다리 등록 (총 {len(ladder)}단계):\n{lines}\n\n"
+            f"상위 레벨을 달성하면 하위 레벨 역할은 자동으로 빠져요. (5분마다 확인)",
+            ephemeral=True,
+        )
+
+    @활동.command(name="승급목록", description="레벨 역할 사다리를 봅니다")
+    @app_commands.checks.has_permissions(manage_roles=True)
+    async def list_promote(self, interaction: discord.Interaction):
+        ladder = level_role_ladder(get_guild_config(interaction.guild.id))
+        if not ladder:
+            await interaction.response.send_message(
+                "등록된 레벨 역할이 없어요. `/활동 승급` 으로 추가하세요.", ephemeral=True)
+            return
+        lines = "\n".join(f"Lv.{t['level']} → <@&{t['role_id']}>" for t in ladder)
+        await interaction.response.send_message(f"🪜 **레벨 역할 사다리**\n{lines}", ephemeral=True)
+
+    @활동.command(name="승급해제", description="레벨 역할 사다리에서 특정 레벨 단계를 제거")
+    @app_commands.describe(레벨="제거할 단계의 레벨")
+    @app_commands.checks.has_permissions(manage_roles=True)
+    async def remove_promote(self, interaction: discord.Interaction, 레벨: int):
+        ladder = level_role_ladder(get_guild_config(interaction.guild.id))
+        new = [t for t in ladder if t["level"] != 레벨]
+        if len(new) == len(ladder):
+            await interaction.response.send_message(f"Lv.{레벨} 단계가 사다리에 없어요.", ephemeral=True)
+            return
+        update_guild_config(interaction.guild.id, {"level_roles": new})
+        await interaction.response.send_message(
+            f"✅ Lv.{레벨} 단계를 사다리에서 뺐어요. (멤버의 기존 역할·역할 자체는 그대로 두었어요)",
             ephemeral=True,
         )
 

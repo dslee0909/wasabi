@@ -48,3 +48,16 @@ def update_guild_config(guild_id: int, changes: dict[str, Any]) -> dict:
     data[key] = cfg
     _save_all(data)
     return cfg
+
+
+def level_role_ladder(cfg: dict) -> list[dict]:
+    """레벨 역할 사다리를 [{'level': int, 'role_id': int}, ...] (레벨 오름차순)로 반환.
+
+    신규 'level_roles' 가 있으면 그것을 쓰고, 없으면 레거시 단일 설정
+    promote_role_id/promote_level 을 1단계 사다리로 승계한다. (하위호환)
+    """
+    tiers = cfg.get("level_roles")
+    if tiers is None:
+        rid = cfg.get("promote_role_id")
+        tiers = [{"level": cfg.get("promote_level", 10), "role_id": rid}] if rid else []
+    return sorted(tiers, key=lambda t: t["level"])
