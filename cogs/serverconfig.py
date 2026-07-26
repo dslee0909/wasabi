@@ -63,6 +63,9 @@ class ServerConfig(commands.Cog):
         ladder = level_role_ladder(cfg)
         promote = ("\n".join(f"Lv.{t['level']} {mark(self._role(guild, t['role_id']))}" for t in ladder)
                    if ladder else "—")
+        strip = cfg.get("graduation_strip_roles", [])
+        if strip:
+            promote += "\n🎓 졸업제거: " + ", ".join(mark(self._role(guild, r)) for r in strip)
         panels = cfg.get("reaction_panels", {})
         active = cfg.get("active_panel_by_channel", {})  # {채널: 메시지}
         if panels:
