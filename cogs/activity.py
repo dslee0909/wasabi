@@ -47,7 +47,7 @@ class Activity(commands.Cog):
             if not tiers:
                 continue
             ladder_roles = {r for _, r in tiers}
-            # 사다리 진입(Lv10+ 승급) 시 함께 뺄 '졸업 제거' 역할 (예: newbie)
+            # 사다리 진입(Lv10+ 승급) 시 함께 뺄 '등업 제거' 역할 (예: newbie)
             strip_roles = {r for r in (guild.get_role(rid)
                            for rid in cfg.get("graduation_strip_roles", [])) if r is not None}
 
@@ -73,7 +73,7 @@ class Activity(commands.Cog):
                 to_add = [target] if target and target not in have else []
                 # 목표를 제외한 다른 사다리 역할은 전부 제거 (하위 레벨 역할 자동 탈락)
                 to_remove = [r for r in ladder_roles if r in have and r is not target]
-                # 사다리에 진입한 멤버(target 있음)면 졸업 제거 역할(newbie 등)도 뺀다.
+                # 사다리에 진입한 멤버(target 있음)면 등업 제거 역할(newbie 등)도 뺀다.
                 # 사다리 밖(target 없음, 아직 신입)은 건드리지 않음.
                 if target:
                     to_remove += [r for r in strip_roles if r in have]
@@ -116,7 +116,7 @@ class Activity(commands.Cog):
             ephemeral=True,
         )
 
-    @활동.command(name="승급목록", description="레벨 역할 사다리와 졸업 제거 역할을 봅니다")
+    @활동.command(name="승급목록", description="레벨 역할 사다리와 등업 제거 역할을 봅니다")
     @app_commands.checks.has_permissions(manage_roles=True)
     async def list_promote(self, interaction: discord.Interaction):
         cfg = get_guild_config(interaction.guild.id)
@@ -129,10 +129,10 @@ class Activity(commands.Cog):
         msg = f"🪜 **레벨 역할 사다리**\n{lines}"
         strip = cfg.get("graduation_strip_roles", [])
         if strip:
-            msg += "\n\n🎓 **졸업 제거** (Lv10+ 승급 시 제거): " + ", ".join(f"<@&{r}>" for r in strip)
+            msg += "\n\n⬆️ **등업 제거** (Lv10+ 승급 시 제거): " + ", ".join(f"<@&{r}>" for r in strip)
         await interaction.response.send_message(msg, ephemeral=True)
 
-    @활동.command(name="졸업제거", description="사다리 진입(Lv10+ 승급) 시 자동으로 뺄 역할을 토글합니다 (예: newbie)")
+    @활동.command(name="등업제거", description="사다리 진입(Lv10+ 승급) 시 자동으로 뺄 역할을 토글합니다 (예: newbie)")
     @app_commands.describe(역할="승급 시 제거할 역할 (같은 역할 다시 실행하면 해제)")
     @app_commands.checks.has_permissions(manage_roles=True)
     async def toggle_grad_strip(self, interaction: discord.Interaction, 역할: discord.Role):
@@ -141,13 +141,13 @@ class Activity(commands.Cog):
         if 역할.id in strip:
             strip.remove(역할.id)
             update_guild_config(interaction.guild.id, {"graduation_strip_roles": strip})
-            msg = f"✅ **{역할.name}** 을 졸업 제거 목록에서 뺐어요."
+            msg = f"✅ **{역할.name}** 을 등업 제거 목록에서 뺐어요."
         else:
             strip.append(역할.id)
             update_guild_config(interaction.guild.id, {"graduation_strip_roles": strip})
             msg = f"✅ 이제 Lv10+ 로 승급(사다리 진입)하면 **{역할.name}** 을 자동으로 뺄게요."
         if strip:
-            msg += "\n현재 졸업 제거 대상: " + ", ".join(f"<@&{r}>" for r in strip)
+            msg += "\n현재 등업 제거 대상: " + ", ".join(f"<@&{r}>" for r in strip)
         await interaction.response.send_message(msg, ephemeral=True)
 
     @활동.command(name="승급해제", description="레벨 역할 사다리에서 특정 레벨 단계를 제거")

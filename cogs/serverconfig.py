@@ -65,7 +65,7 @@ class ServerConfig(commands.Cog):
                    if ladder else "—")
         strip = cfg.get("graduation_strip_roles", [])
         if strip:
-            promote += "\n🎓 졸업제거: " + ", ".join(mark(self._role(guild, r)) for r in strip)
+            promote += "\n⬆️ 등업제거: " + ", ".join(mark(self._role(guild, r)) for r in strip)
         panels = cfg.get("reaction_panels", {})
         active = cfg.get("active_panel_by_channel", {})  # {채널: 메시지}
         if panels:
