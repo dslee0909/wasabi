@@ -80,8 +80,8 @@ RODS = {
     4: {"name": "다이아 낚싯대", "emoji": "💎", "price": 800_000,   "mult": 2.5, "shiny": 0.14, "cd": 4.40, "cap": 8,  "img": "rod_4_diamond.png"},
     5: {"name": "용왕의 낚싯대", "emoji": "🐉", "price": 2_200_000, "mult": 3.0, "shiny": 0.16, "cd": 4.25, "cap": 10, "img": "rod_5_dragon.png"},
     6: {"name": "전설의 낚싯대", "emoji": "👑", "price": 8_000_000, "mult": 4.0, "shiny": 0.18, "cd": 4.10, "cap": 12, "img": "rod_6_legendary.png"},
-    7: {"name": "영혼 낚시대",   "emoji": "🔮", "price": '?',       "mult": 5.0, "shiny": 0.20, "cd": 3.95, "cap": 15, "img": "rod_7_soul.png"},
-    8: {"name": "와사비 낚시대", "emoji": "🍃", "price": '?',       "mult": 6.0, "shiny": 0.21, "cd": 3.80, "cap": 18, "img": "rod_8_wasabi.png"},
+    7: {"name": "영혼 낚시대",   "emoji": "🔮", "price": 24_000_000, "mult": 5.0, "shiny": 0.20, "cd": 3.95, "cap": 15, "img": "rod_7_soul.png"},
+    8: {"name": "와사비 낚시대", "emoji": "🍃", "price": 70_000_000, "mult": 6.0, "shiny": 0.21, "cd": 3.80, "cap": 18, "img": "rod_8_wasabi.png"},
 }
 ROD_TIERS = (1, 2, 3, 4, 5, 6, 7, 8)  # 상점에 나오는 낚싯대 티어
 
@@ -596,10 +596,10 @@ class Economy(commands.Cog):
         my = vt.get_rod(interaction.guild.id, interaction.user.id)
         cur = RODS[my]
 
-        # 구매 가능한 티어(1~6) 이미지가 다 있으면 이미지 상점, 아니면 텍스트
-        # (입고중 등 가격 미정 티어는 아트가 없어도 됨 — render_shop이 썸네일을 비움)
-        all_imgs = all(os.path.exists(os.path.join(ROD_DIR, RODS[t]["img"])) for t in BUYABLE_TIERS)
-        if all_imgs:
+        # 아트가 하나라도 있으면 이미지 상점 (아트 없는 신규 티어는 render_shop 이 빈 썸네일로 처리).
+        # 아트가 전혀 없으면(초기 상태) 텍스트 상점으로 폴백.
+        img_shop = any(os.path.exists(os.path.join(ROD_DIR, RODS[t]["img"])) for t in BUYABLE_TIERS)
+        if img_shop:
             # 이미지 안에는 이모지가 두부(□)로 나오므로 이모지 없는 라벨 사용
             entries = [{
                 "name": RODS[t]["name"], "img": RODS[t]["img"],
