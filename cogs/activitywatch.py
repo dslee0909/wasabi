@@ -3,8 +3,8 @@
 최소 활동량을 못 채운 멤버를 두 갈래로 자동 추적해, 각각 다른 관리자 채널에
 '현재 명단 전체'를 올린다. 명단이 바뀔 때(추가/해결)만 다시 보낸다.
 
-① 신입 미달성  — 입장 2주(336h)가 지났는데 레벨10 역할이 없는 멤버
-                  (레벨10 = /활동 승급 으로 지정한 promote_role. 없으면 계산 레벨로 폴백)
+① 신입 미달성  — 입장 2주가 지났는데 누적 음성이 5시간 미만인 멤버
+                  (정규 역할 보유자는 제외 — 수동 부여 예외 보호)
 ② 활동 미달성  — 레벨10 역할을 가진 정착 멤버 중, '가장 최근 완료한 30일 기간'에
                   음성이 20시간 미만인 멤버. 각자 레벨10 도달일(정착 기준일)부터
                   30일씩 끊어서 정산한다 — 매 시점의 이동 창이 아니라 고정 기간.
@@ -24,6 +24,7 @@ import voicetime as vt
 from store import get_guild_config, update_guild_config, level_role_ladder
 
 NEWCOMER_GRACE_DAYS = 14      # 입장 후 이 기간이 지나면 신입 판정
+NEWCOMER_MIN_HOURS = 5        # 신입이 유예기간 내 채워야 하는 누적 음성 시간
 DEFAULT_PROMOTE_LEVEL = 10    # promote_level 미설정 시 기준 레벨
 ACTIVITY_PERIOD_DAYS = 30     # 활동 판정 기간
 ACTIVITY_MIN_HOURS = 20       # 이 기간에 채워야 하는 음성 시간
@@ -63,8 +64,10 @@ class ActivityWatch(commands.Cog):
 
     # ---- 명단 계산 ----
     def _newcomer_list(self, guild: discord.Guild, cfg: dict):
-        """(member, 입장경과일) 목록 — 입장 2주+ · 레벨10 역할 없음."""
+        """(member, 입장경과일) 목록 — 입장 2주+ · 누적 음성 5시간 미만.
+        정규(레벨 역할) 보유자는 수동 부여 예외 보호를 위해 항상 제외한다."""
         out = []
+        need = NEWCOMER_MIN_HOURS * 3600
         for m in guild.members:
             if m.bot:
                 continue
@@ -72,7 +75,9 @@ class ActivityWatch(commands.Cog):
             if days is None or days < NEWCOMER_GRACE_DAYS:
                 continue
             if self._has_level_role(guild, m, cfg):
-                continue
+                continue  # 이미 정규 → 대상 아님
+            if vt.total_seconds(guild.id, m.id) >= need:
+                continue  # 음성 5시간 달성 → 대상 아님
             out.append((m, days))
         out.sort(key=lambda x: -x[1])  # 오래된 미달성부터
         return out
@@ -119,7 +124,8 @@ class ActivityWatch(commands.Cog):
             desc = "✅ 현재 미달성 신입이 없어요."
             color = discord.Color.green()
         e = discord.Embed(title=f"🌱 신입 미달성 ({len(rows)}명)", description=desc, color=color)
-        e.set_footer(text=f"입장 {NEWCOMER_GRACE_DAYS}일 경과 · 레벨10 미달 · 레벨10 달성 시 자동 제외")
+        e.set_footer(text=f"입장 {NEWCOMER_GRACE_DAYS}일 경과 · 누적 음성 {NEWCOMER_MIN_HOURS}시간 미만 "
+                          f"· {NEWCOMER_MIN_HOURS}시간 달성 시 자동 제외")
         return e
 
     @staticmethod
